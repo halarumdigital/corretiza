@@ -58,6 +58,7 @@ const clientNavItems: NavItem[] = [
       { href: "/client/imoveis/cidades", label: "Cidades", icon: <MapPin className="w-4 h-4" /> },
     ]
   },
+  { href: "/client/corretores", label: "Corretores", icon: <User className="w-5 h-5" /> },
   {
     label: "Website",
     icon: <Globe className="w-5 h-5" />,

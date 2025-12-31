@@ -33,6 +33,7 @@ import ComercialLeads from "@/pages/client/comercial-leads";
 import MeusImoveis from "@/pages/client/meus-imoveis";
 import Amenities from "@/pages/client/amenities";
 import Cities from "@/pages/client/cities";
+import Brokers from "@/pages/client/brokers";
 import Domains from "@/pages/client/domains";
 import WebsiteConfig from "@/pages/client/website-config";
 import Agents from "@/pages/client/agents";
@@ -252,6 +253,14 @@ function Router() {
           requiredRole="client"
           title="Cidades"
           subtitle="Gerencie as cidades para cadastro de imóveis"
+        />
+      </Route>
+      <Route path="/client/corretores">
+        <ProtectedRoute
+          component={Brokers}
+          requiredRole="client"
+          title="Corretores"
+          subtitle="Gerencie sua equipe de corretores"
         />
       </Route>
       <Route path="/client/domains">

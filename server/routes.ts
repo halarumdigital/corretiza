@@ -25,7 +25,7 @@ import {
   insertAiAgentSchema, insertConversationSchema, insertMessageSchema,
   insertContactListSchema, insertContactListItemSchema, insertScheduledMessageSchema,
   insertCustomerSchema, insertLeadSchema, insertPropertySchema,
-  insertCompanyCustomDomainSchema, insertPlanSchema
+  insertCompanyCustomDomainSchema, insertPlanSchema, insertBrokerSchema
 } from "@shared/schema";
 import { getEmailService } from "./services/emailService";
 
@@ -653,6 +653,140 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Delete plan error:", error);
       res.status(500).json({ error: "Erro ao excluir plano" });
+    }
+  });
+
+  // Brokers (Corretores) - Client routes
+  app.get("/api/brokers", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.companyId) {
+        return res.status(400).json({ error: "Company ID não encontrado" });
+      }
+
+      const brokers = await storage.getBrokersByCompany(req.user.companyId);
+      res.json(brokers);
+    } catch (error) {
+      console.error("Error fetching brokers:", error);
+      res.status(500).json({ error: "Erro ao buscar corretores" });
+    }
+  });
+
+  app.get("/api/brokers/limits", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.companyId) {
+        return res.status(400).json({ error: "Company ID não encontrado" });
+      }
+
+      const company = await storage.getCompany(req.user.companyId);
+      if (!company) {
+        return res.status(404).json({ error: "Empresa não encontrada" });
+      }
+
+      let brokerLimit = 1;
+      let planName = "Sem plano";
+      if (company.planId) {
+        const plan = await storage.getPlan(company.planId);
+        if (plan) {
+          brokerLimit = plan.agentLimit;
+          planName = plan.name;
+        }
+      }
+
+      const currentCount = await storage.countBrokersByCompany(req.user.companyId);
+
+      res.json({
+        currentCount,
+        limit: brokerLimit,
+        planName,
+        canCreate: currentCount < brokerLimit
+      });
+    } catch (error) {
+      console.error("Error fetching broker limits:", error);
+      res.status(500).json({ error: "Erro ao buscar limites de corretores" });
+    }
+  });
+
+  app.post("/api/brokers", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.companyId) {
+        return res.status(400).json({ error: "Company ID não encontrado" });
+      }
+
+      // Verificar limite do plano
+      const company = await storage.getCompany(req.user.companyId);
+      if (!company) {
+        return res.status(404).json({ error: "Empresa não encontrada" });
+      }
+
+      let brokerLimit = 1; // Limite padrão se não houver plano
+      if (company.planId) {
+        const plan = await storage.getPlan(company.planId);
+        if (plan) {
+          brokerLimit = plan.agentLimit;
+        }
+      }
+
+      const currentBrokerCount = await storage.countBrokersByCompany(req.user.companyId);
+      if (currentBrokerCount >= brokerLimit) {
+        return res.status(403).json({
+          error: `Limite de corretores atingido. Seu plano permite até ${brokerLimit} corretor(es).`,
+          currentCount: currentBrokerCount,
+          limit: brokerLimit
+        });
+      }
+
+      const validatedData = insertBrokerSchema.parse({
+        ...req.body,
+        companyId: req.user.companyId
+      });
+      const broker = await storage.createBroker(validatedData);
+      res.status(201).json(broker);
+    } catch (error) {
+      console.error("Error creating broker:", error);
+      res.status(500).json({ error: "Erro ao criar corretor" });
+    }
+  });
+
+  app.put("/api/brokers/:id", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+
+      const broker = await storage.getBroker(id);
+      if (!broker) {
+        return res.status(404).json({ error: "Corretor não encontrado" });
+      }
+
+      if (broker.companyId !== req.user?.companyId) {
+        return res.status(403).json({ error: "Sem permissão para editar este corretor" });
+      }
+
+      const validatedData = insertBrokerSchema.partial().parse(req.body);
+      const updatedBroker = await storage.updateBroker(id, validatedData);
+      res.json(updatedBroker);
+    } catch (error) {
+      console.error("Error updating broker:", error);
+      res.status(500).json({ error: "Erro ao atualizar corretor" });
+    }
+  });
+
+  app.delete("/api/brokers/:id", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+
+      const broker = await storage.getBroker(id);
+      if (!broker) {
+        return res.status(404).json({ error: "Corretor não encontrado" });
+      }
+
+      if (broker.companyId !== req.user?.companyId) {
+        return res.status(403).json({ error: "Sem permissão para excluir este corretor" });
+      }
+
+      await storage.deleteBroker(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting broker:", error);
+      res.status(500).json({ error: "Erro ao deletar corretor" });
     }
   });
 

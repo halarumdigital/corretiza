@@ -10,7 +10,7 @@ import {
   Amenity, InsertAmenity, City, InsertCity, CompanyCustomDomain, InsertCompanyCustomDomain,
   WebsiteTemplate, InsertWebsiteTemplate, CompanyWebsite, InsertCompanyWebsite,
   CompanyAgent, InsertCompanyAgent, CompanyTestimonial, InsertCompanyTestimonial,
-  Plan, InsertPlan
+  Plan, InsertPlan, Broker, InsertBroker
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -184,6 +184,14 @@ export interface IStorage {
   createPlan(plan: InsertPlan): Promise<Plan>;
   updatePlan(id: string, updates: Partial<Plan>): Promise<Plan>;
   deletePlan(id: string): Promise<void>;
+
+  // Brokers (Corretores)
+  getBroker(id: string): Promise<Broker | undefined>;
+  getBrokersByCompany(companyId: string): Promise<Broker[]>;
+  countBrokersByCompany(companyId: string): Promise<number>;
+  createBroker(broker: InsertBroker): Promise<Broker>;
+  updateBroker(id: string, updates: Partial<Broker>): Promise<Broker>;
+  deleteBroker(id: string): Promise<void>;
 }
 
 export class MySQLStorage implements IStorage {
@@ -3323,6 +3331,117 @@ export class MySQLStorage implements IStorage {
       'DELETE FROM plans WHERE id = ?',
       [id]
     );
+  }
+
+  // ============================================
+  // BROKERS (CORRETORES) METHODS
+  // ============================================
+
+  async getBroker(id: string): Promise<Broker | undefined> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM brokers WHERE id = ?',
+      [id]
+    );
+
+    const brokers = rows as any[];
+    if (brokers.length === 0) return undefined;
+
+    return this.mapBrokerRow(brokers[0]);
+  }
+
+  async getBrokersByCompany(companyId: string): Promise<Broker[]> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM brokers WHERE company_id = ? ORDER BY name',
+      [companyId]
+    );
+
+    return (rows as any[]).map(row => this.mapBrokerRow(row));
+  }
+
+  async countBrokersByCompany(companyId: string): Promise<number> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT COUNT(*) as count FROM brokers WHERE company_id = ?',
+      [companyId]
+    );
+
+    return (rows as any[])[0].count;
+  }
+
+  async createBroker(broker: InsertBroker): Promise<Broker> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const id = randomUUID();
+    await this.connection.execute(
+      'INSERT INTO brokers (id, company_id, name, email, whatsapp) VALUES (?, ?, ?, ?, ?)',
+      [id, broker.companyId, broker.name, broker.email || null, broker.whatsapp || null]
+    );
+
+    const created = await this.getBroker(id);
+    if (!created) throw new Error('Failed to create broker');
+    return created;
+  }
+
+  async updateBroker(id: string, updates: Partial<Broker>): Promise<Broker> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    if (updates.name !== undefined) {
+      setClauses.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.email !== undefined) {
+      setClauses.push('email = ?');
+      values.push(updates.email);
+    }
+    if (updates.whatsapp !== undefined) {
+      setClauses.push('whatsapp = ?');
+      values.push(updates.whatsapp);
+    }
+
+    if (setClauses.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    setClauses.push('updated_at = NOW()');
+    values.push(id);
+
+    await this.connection.execute(
+      `UPDATE brokers SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
+    );
+
+    const updated = await this.getBroker(id);
+    if (!updated) throw new Error('Broker not found');
+    return updated;
+  }
+
+  async deleteBroker(id: string): Promise<void> {
+    if (!this.connection) throw new Error('No database connection');
+
+    await this.connection.execute(
+      'DELETE FROM brokers WHERE id = ?',
+      [id]
+    );
+  }
+
+  private mapBrokerRow(row: any): Broker {
+    return {
+      id: row.id,
+      companyId: row.company_id,
+      name: row.name,
+      email: row.email,
+      whatsapp: row.whatsapp,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   }
 
   private mapPlanRow(row: any): Plan {

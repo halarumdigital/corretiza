@@ -339,6 +339,17 @@ export const plans = mysqlTable("plans", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
+// Brokers Table (Corretores)
+export const brokers = mysqlTable("brokers", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+  companyId: varchar("company_id", { length: 36 }).notNull(),
+  name: varchar("name", { length: 255 }).notNull(),
+  email: varchar("email", { length: 255 }),
+  whatsapp: varchar("whatsapp", { length: 20 }),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
   email: true,
@@ -607,6 +618,15 @@ export const insertPlanSchema = createInsertSchema(plans).pick({
   price: true,
   agentLimit: true,
   isActive: true,
+}).extend({
+  isActive: z.union([z.boolean(), z.number()]).transform(val => Boolean(val)).optional(),
+});
+
+export const insertBrokerSchema = createInsertSchema(brokers).pick({
+  companyId: true,
+  name: true,
+  email: true,
+  whatsapp: true,
 });
 
 // Types
@@ -658,3 +678,5 @@ export type CompanyTestimonial = typeof companyTestimonials.$inferSelect;
 export type InsertCompanyTestimonial = z.infer<typeof insertCompanyTestimonialSchema>;
 export type Plan = typeof plans.$inferSelect;
 export type InsertPlan = z.infer<typeof insertPlanSchema>;
+export type Broker = typeof brokers.$inferSelect;
+export type InsertBroker = z.infer<typeof insertBrokerSchema>;
