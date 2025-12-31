@@ -10,7 +10,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
-import { Company } from "@shared/schema";
+import { Company, Plan } from "@shared/schema";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Building, Plus, Search, Edit, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
@@ -31,6 +33,7 @@ export default function Companies() {
     responsibleName: "",
     responsiblePhone: "",
     responsibleEmail: "",
+    planId: "",
     userEmail: "",
     userPassword: "",
     adminPassword: "", // Nova senha para o admin da empresa (apenas na edição)
@@ -38,6 +41,10 @@ export default function Companies() {
 
   const { data: companies = [], isLoading } = useQuery<Company[]>({
     queryKey: ["/api/companies"],
+  });
+
+  const { data: plans = [] } = useQuery<Plan[]>({
+    queryKey: ["/api/plans"],
   });
 
   const createMutation = useMutation({
@@ -98,6 +105,25 @@ export default function Companies() {
     },
   });
 
+  const toggleStatusMutation = useMutation({
+    mutationFn: ({ id, status }: { id: string; status: string }) =>
+      apiPut(`/companies/${id}`, { status }),
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({ queryKey: ["/api/companies"] });
+      toast({
+        title: "Sucesso",
+        description: `Acesso da empresa ${variables.status === 'active' ? 'habilitado' : 'desabilitado'} com sucesso!`,
+      });
+    },
+    onError: (error) => {
+      toast({
+        title: "Erro",
+        description: error instanceof Error ? error.message : "Erro ao alterar status da empresa",
+        variant: "destructive",
+      });
+    },
+  });
+
   const resetForm = () => {
     setFormData({
       name: "",
@@ -110,6 +136,7 @@ export default function Companies() {
       responsibleName: "",
       responsiblePhone: "",
       responsibleEmail: "",
+      planId: "",
       userEmail: "",
       userPassword: "",
       adminPassword: "",
@@ -146,6 +173,7 @@ export default function Companies() {
       responsibleName: company.responsibleName || "",
       responsiblePhone: company.responsiblePhone || "",
       responsibleEmail: company.responsibleEmail || "",
+      planId: company.planId || "",
       userEmail: "",
       userPassword: "",
       adminPassword: "",
@@ -157,6 +185,11 @@ export default function Companies() {
     if (confirm("Tem certeza que deseja excluir esta empresa?")) {
       deleteMutation.mutate(id);
     }
+  };
+
+  const handleToggleStatus = (company: Company) => {
+    const newStatus = company.status === 'active' ? 'inactive' : 'active';
+    toggleStatusMutation.mutate({ id: company.id, status: newStatus });
   };
 
   const filteredCompanies = companies.filter((company) =>
@@ -250,6 +283,32 @@ export default function Companies() {
                   value={formData.address}
                   onChange={(e) => setFormData(prev => ({ ...prev, address: e.target.value }))}
                 />
+              </div>
+
+              {/* Seleção de Plano */}
+              <div className="pt-4 border-t">
+                <h4 className="text-sm font-medium mb-3">Plano</h4>
+                <div>
+                  <Label htmlFor="planId">Plano da Empresa</Label>
+                  <Select
+                    value={formData.planId}
+                    onValueChange={(value) => setFormData(prev => ({ ...prev, planId: value }))}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Selecione um plano" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {plans.filter(p => p.isActive).map((plan) => (
+                        <SelectItem key={plan.id} value={plan.id}>
+                          {plan.name} - R$ {parseFloat(plan.price?.toString() || "0").toFixed(2).replace('.', ',')}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    Selecione o plano que será atribuído a esta empresa
+                  </p>
+                </div>
               </div>
 
               {/* Dados do Responsável */}
@@ -379,9 +438,9 @@ export default function Companies() {
             <TableHeader>
               <TableRow>
                 <TableHead>Empresa</TableHead>
+                <TableHead>Plano</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead>Telefone</TableHead>
-                <TableHead>Cidade</TableHead>
                 <TableHead>Criado em</TableHead>
                 <TableHead>Ações</TableHead>
               </TableRow>
@@ -413,12 +472,27 @@ export default function Companies() {
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant={company.status === 'active' ? 'default' : 'secondary'}>
-                        {company.status === 'active' ? 'Ativa' : 'Inativa'}
-                      </Badge>
+                      {company.planId ? (
+                        <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-blue-100 text-blue-700">
+                          {plans.find(p => p.id === company.planId)?.name || "Plano não encontrado"}
+                        </span>
+                      ) : (
+                        <span className="text-muted-foreground">-</span>
+                      )}
+                    </TableCell>
+                    <TableCell>
+                      <div className="flex items-center gap-2">
+                        <Switch
+                          checked={company.status === 'active'}
+                          onCheckedChange={() => handleToggleStatus(company)}
+                          disabled={toggleStatusMutation.isPending}
+                        />
+                        <span className={`text-sm ${company.status === 'active' ? 'text-green-600' : 'text-muted-foreground'}`}>
+                          {company.status === 'active' ? 'Ativa' : 'Inativa'}
+                        </span>
+                      </div>
                     </TableCell>
                     <TableCell>{company.phone || "-"}</TableCell>
-                    <TableCell>{company.city || "-"}</TableCell>
                     <TableCell>
                       {company.createdAt && company.createdAt !== '0000-00-00 00:00:00' 
                         ? format(new Date(company.createdAt), "dd/MM/yyyy", { locale: ptBR })

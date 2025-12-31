@@ -17,6 +17,7 @@ import EvolutionApiSettings from "@/pages/admin/evolution-api";
 import AiSettings from "@/pages/admin/ai-settings";
 import Companies from "@/pages/admin/companies";
 import CustomDomains from "@/pages/admin/custom-domains";
+import Plans from "@/pages/admin/plans";
 
 // Client pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -138,6 +139,14 @@ function Router() {
           requiredRole="admin"
           title="Domínios Customizados"
           subtitle="Gerenciamento de domínios personalizados"
+        />
+      </Route>
+      <Route path="/admin/plans">
+        <ProtectedRoute
+          component={Plans}
+          requiredRole="admin"
+          title="Planos"
+          subtitle="Gerenciamento de planos"
         />
       </Route>
 

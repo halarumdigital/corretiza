@@ -25,7 +25,7 @@ import {
   insertAiAgentSchema, insertConversationSchema, insertMessageSchema,
   insertContactListSchema, insertContactListItemSchema, insertScheduledMessageSchema,
   insertFunnelStageSchema, insertCustomerSchema, insertLeadSchema, insertPropertySchema,
-  insertCompanyCustomDomainSchema
+  insertCompanyCustomDomainSchema, insertPlanSchema
 } from "@shared/schema";
 import { getEmailService } from "./services/emailService";
 
@@ -139,6 +139,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const isValidPassword = await comparePassword(password, user.password);
       if (!isValidPassword) {
         return res.status(401).json({ error: "Credenciais inválidas" });
+      }
+
+      // Verificar se a empresa está ativa (apenas para clientes)
+      if (user.role === 'client' && user.companyId) {
+        const company = await storage.getCompany(user.companyId);
+        if (!company || company.status !== 'active') {
+          return res.status(403).json({ error: "Acesso bloqueado: sua empresa está com acesso desabilitado. Entre em contato com o administrador." });
+        }
       }
 
       const token = generateToken(user);
@@ -505,23 +513,83 @@ export async function registerRoutes(app: Express): Promise<Server> {
     try {
       const { id } = req.params;
       const { adminPassword, ...companyData } = req.body;
-      
+
+      // Obter status atual da empresa antes de atualizar
+      const currentCompany = await storage.getCompany(id);
+      const wasActive = currentCompany?.status === 'active';
+
       // Validar dados da empresa
       const validatedCompanyData = insertCompanySchema.partial().parse(companyData);
-      
+
       // Atualizar dados da empresa
       const company = await storage.updateCompany(id, validatedCompanyData);
-      
+
+      // Se a empresa foi bloqueada (status mudou de active para inactive), excluir instâncias Evolution
+      const isNowInactive = company.status === 'inactive';
+      if (wasActive && isNowInactive) {
+        console.log(`🚫 Empresa ${company.name} foi bloqueada. Excluindo instâncias Evolution API...`);
+
+        try {
+          // Buscar todas as instâncias WhatsApp da empresa
+          const instances = await storage.getWhatsappInstancesByCompany(id);
+
+          if (instances.length > 0) {
+            // Buscar configuração da Evolution API
+            const evolutionConfig = await storage.getEvolutionApiConfiguration();
+
+            if (evolutionConfig) {
+              const evolutionService = new EvolutionApiService({
+                baseURL: evolutionConfig.evolutionURL,
+                token: evolutionConfig.evolutionToken
+              });
+
+              // Excluir cada instância
+              for (const instance of instances) {
+                const instanceName = instance.evolutionInstanceId || instance.name;
+
+                if (instanceName) {
+                  try {
+                    console.log(`🗑️ Excluindo instância Evolution: ${instanceName}`);
+                    await evolutionService.deleteInstance(instanceName);
+                    console.log(`✅ Instância ${instanceName} excluída da Evolution API`);
+                  } catch (evolutionError) {
+                    console.error(`⚠️ Erro ao excluir instância ${instanceName} da Evolution API:`, evolutionError);
+                    // Continua mesmo se falhar na Evolution API
+                  }
+                }
+
+                // Excluir do banco de dados
+                await storage.deleteWhatsappInstance(instance.id);
+                console.log(`✅ Instância ${instance.name} excluída do banco de dados`);
+              }
+
+              console.log(`✅ ${instances.length} instância(s) excluída(s) para empresa ${company.name}`);
+            } else {
+              console.warn(`⚠️ Configuração Evolution API não encontrada. Excluindo apenas do banco de dados.`);
+              // Mesmo sem Evolution API, excluir do banco
+              for (const instance of instances) {
+                await storage.deleteWhatsappInstance(instance.id);
+              }
+            }
+          } else {
+            console.log(`ℹ️ Empresa ${company.name} não possui instâncias WhatsApp.`);
+          }
+        } catch (deleteError) {
+          console.error(`❌ Erro ao excluir instâncias da empresa ${company.name}:`, deleteError);
+          // Não falhar a atualização da empresa por erro na exclusão de instâncias
+        }
+      }
+
       // Se uma nova senha foi fornecida, atualizar a senha do admin da empresa
       if (adminPassword && adminPassword.trim() !== '') {
         if (adminPassword.length < 6) {
           return res.status(400).json({ error: "Senha deve ter pelo menos 6 caracteres" });
         }
-        
+
         const hashedPassword = await hashPassword(adminPassword);
         await storage.updateCompanyAdminPassword(id, hashedPassword);
       }
-      
+
       res.json(company);
     } catch (error) {
       console.error("Update company error:", error);
@@ -537,6 +605,51 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Delete company error:", error);
       res.status(500).json({ error: "Erro ao excluir empresa" });
+    }
+  });
+
+  // Plans (Admin only)
+  app.get("/api/plans", authenticate, requireAdmin, async (req, res) => {
+    try {
+      const plans = await storage.getAllPlans();
+      res.json(plans);
+    } catch (error) {
+      console.error("Get plans error:", error);
+      res.status(500).json({ error: "Erro ao buscar planos" });
+    }
+  });
+
+  app.post("/api/plans", authenticate, requireAdmin, async (req, res) => {
+    try {
+      const validatedData = insertPlanSchema.parse(req.body);
+      const plan = await storage.createPlan(validatedData);
+      res.status(201).json(plan);
+    } catch (error) {
+      console.error("Create plan error:", error);
+      res.status(500).json({ error: "Erro ao criar plano" });
+    }
+  });
+
+  app.put("/api/plans/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      const validatedData = insertPlanSchema.partial().parse(req.body);
+      const plan = await storage.updatePlan(id, validatedData);
+      res.json(plan);
+    } catch (error) {
+      console.error("Update plan error:", error);
+      res.status(500).json({ error: "Erro ao atualizar plano" });
+    }
+  });
+
+  app.delete("/api/plans/:id", authenticate, requireAdmin, async (req, res) => {
+    try {
+      const { id } = req.params;
+      await storage.deletePlan(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Delete plan error:", error);
+      res.status(500).json({ error: "Erro ao excluir plano" });
     }
   });
 

@@ -9,7 +9,8 @@ import {
   Customer, InsertCustomer, Lead, InsertLead, Property, InsertProperty,
   Amenity, InsertAmenity, City, InsertCity, CompanyCustomDomain, InsertCompanyCustomDomain,
   WebsiteTemplate, InsertWebsiteTemplate, CompanyWebsite, InsertCompanyWebsite,
-  CompanyAgent, InsertCompanyAgent, CompanyTestimonial, InsertCompanyTestimonial
+  CompanyAgent, InsertCompanyAgent, CompanyTestimonial, InsertCompanyTestimonial,
+  Plan, InsertPlan
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -179,6 +180,13 @@ export interface IStorage {
   createCompanyTestimonial(testimonial: InsertCompanyTestimonial): Promise<CompanyTestimonial>;
   updateCompanyTestimonial(id: string, updates: Partial<CompanyTestimonial>): Promise<CompanyTestimonial>;
   deleteCompanyTestimonial(id: string): Promise<void>;
+
+  // Plans
+  getPlan(id: string): Promise<Plan | undefined>;
+  getAllPlans(): Promise<Plan[]>;
+  createPlan(plan: InsertPlan): Promise<Plan>;
+  updatePlan(id: string, updates: Partial<Plan>): Promise<Plan>;
+  deletePlan(id: string): Promise<void>;
 }
 
 export class MySQLStorage implements IStorage {
@@ -602,29 +610,51 @@ export class MySQLStorage implements IStorage {
   // Company methods
   async getCompany(id: string): Promise<Company | undefined> {
     if (!this.connection) throw new Error('No database connection');
-    
+
     const [rows] = await this.connection.execute(
       'SELECT * FROM companies WHERE id = ?',
       [id]
     );
-    return (rows as Company[])[0];
+    const companies = rows as any[];
+    return companies.length > 0 ? this.mapCompanyRow(companies[0]) : undefined;
   }
 
   async getCompaniesByUserId(userId: string): Promise<Company[]> {
     if (!this.connection) throw new Error('No database connection');
-    
+
     const [rows] = await this.connection.execute(
       'SELECT c.* FROM companies c JOIN users u ON c.id = u.company_id WHERE u.id = ?',
       [userId]
     );
-    return rows as Company[];
+    return (rows as any[]).map(row => this.mapCompanyRow(row));
   }
 
   async getAllCompanies(): Promise<Company[]> {
     if (!this.connection) throw new Error('No database connection');
-    
+
     const [rows] = await this.connection.execute('SELECT * FROM companies ORDER BY created_at DESC');
-    return rows as Company[];
+    return (rows as any[]).map(row => this.mapCompanyRow(row));
+  }
+
+  private mapCompanyRow(row: any): Company {
+    return {
+      id: row.id,
+      name: row.name,
+      email: row.email,
+      cnpj: row.cnpj,
+      phone: row.phone,
+      address: row.address,
+      city: row.city,
+      cep: row.cep,
+      avatar: row.avatar,
+      responsibleName: row.responsible_name,
+      responsiblePhone: row.responsible_phone,
+      responsibleEmail: row.responsible_email,
+      planId: row.plan_id,
+      status: row.status,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
   }
 
   async createCompany(company: InsertCompany): Promise<Company> {
@@ -650,18 +680,42 @@ export class MySQLStorage implements IStorage {
 
   async updateCompany(id: string, updates: Partial<Company>): Promise<Company> {
     if (!this.connection) throw new Error('No database connection');
-    
-    const fields = Object.keys(updates).filter(key => updates[key as keyof Company] !== undefined);
-    const values = fields.map(key => updates[key as keyof Company]);
-    
-    if (fields.length > 0) {
-      const setClause = fields.map(field => `${field} = ?`).join(', ');
+
+    // Mapeamento de campos camelCase para snake_case
+    const fieldMap: Record<string, string> = {
+      name: 'name',
+      email: 'email',
+      cnpj: 'cnpj',
+      phone: 'phone',
+      address: 'address',
+      city: 'city',
+      cep: 'cep',
+      avatar: 'avatar',
+      responsibleName: 'responsible_name',
+      responsiblePhone: 'responsible_phone',
+      responsibleEmail: 'responsible_email',
+      planId: 'plan_id',
+      status: 'status',
+    };
+
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined && fieldMap[key]) {
+        setClauses.push(`${fieldMap[key]} = ?`);
+        values.push(value);
+      }
+    }
+
+    if (setClauses.length > 0) {
+      values.push(id);
       await this.connection.execute(
-        `UPDATE companies SET ${setClause} WHERE id = ?`,
-        [...values, id]
+        `UPDATE companies SET ${setClauses.join(', ')} WHERE id = ?`,
+        values
       );
     }
-    
+
     return this.getCompany(id) as Promise<Company>;
   }
 
@@ -3234,6 +3288,107 @@ export class MySQLStorage implements IStorage {
       rating: row.rating,
       comment: row.comment,
       propertyType: row.property_type,
+      isActive: row.is_active,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  // ============================================
+  // PLANS METHODS
+  // ============================================
+
+  async getPlan(id: string): Promise<Plan | undefined> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM plans WHERE id = ?',
+      [id]
+    );
+
+    const plans = rows as any[];
+    return plans.length > 0 ? this.mapPlanRow(plans[0]) : undefined;
+  }
+
+  async getAllPlans(): Promise<Plan[]> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM plans ORDER BY created_at DESC'
+    );
+
+    return (rows as any[]).map(row => this.mapPlanRow(row));
+  }
+
+  async createPlan(plan: InsertPlan): Promise<Plan> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const id = randomUUID();
+    await this.connection.execute(
+      'INSERT INTO plans (id, name, price, agent_limit, is_active) VALUES (?, ?, ?, ?, ?)',
+      [id, plan.name, plan.price, plan.agentLimit || 1, plan.isActive ?? true]
+    );
+
+    const created = await this.getPlan(id);
+    if (!created) throw new Error('Failed to create plan');
+    return created;
+  }
+
+  async updatePlan(id: string, updates: Partial<Plan>): Promise<Plan> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    if (updates.name !== undefined) {
+      setClauses.push('name = ?');
+      values.push(updates.name);
+    }
+    if (updates.price !== undefined) {
+      setClauses.push('price = ?');
+      values.push(updates.price);
+    }
+    if (updates.agentLimit !== undefined) {
+      setClauses.push('agent_limit = ?');
+      values.push(updates.agentLimit);
+    }
+    if (updates.isActive !== undefined) {
+      setClauses.push('is_active = ?');
+      values.push(updates.isActive);
+    }
+
+    if (setClauses.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    setClauses.push('updated_at = NOW()');
+    values.push(id);
+
+    await this.connection.execute(
+      `UPDATE plans SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
+    );
+
+    const updated = await this.getPlan(id);
+    if (!updated) throw new Error('Plan not found');
+    return updated;
+  }
+
+  async deletePlan(id: string): Promise<void> {
+    if (!this.connection) throw new Error('No database connection');
+
+    await this.connection.execute(
+      'DELETE FROM plans WHERE id = ?',
+      [id]
+    );
+  }
+
+  private mapPlanRow(row: any): Plan {
+    return {
+      id: row.id,
+      name: row.name,
+      price: row.price,
+      agentLimit: row.agent_limit,
       isActive: row.is_active,
       createdAt: row.created_at,
       updatedAt: row.updated_at,

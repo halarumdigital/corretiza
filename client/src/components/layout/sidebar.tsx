@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Building, Settings, Waypoints, Bot, Users,
   LayoutDashboard, User, MessageSquare,
-  MessageCircle, LogOut, ChevronDown, ChevronRight, Send, List, Globe, Home, UserPlus, Sparkles, MapPin
+  MessageCircle, LogOut, ChevronDown, ChevronRight, Send, List, Globe, Home, UserPlus, Sparkles, MapPin, CreditCard
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GlobalConfiguration } from "@/types";
@@ -26,6 +26,7 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/evolution-api", label: "Evolution API", icon: <Waypoints className="w-5 h-5" /> },
   { href: "/admin/ai-settings", label: "IA Global", icon: <Bot className="w-5 h-5" /> },
   { href: "/admin/companies", label: "Empresas", icon: <Building className="w-5 h-5" /> },
+  { href: "/admin/plans", label: "Planos", icon: <CreditCard className="w-5 h-5" /> },
   { href: "/admin/custom-domains", label: "Domínios Customizados", icon: <Globe className="w-5 h-5" /> },
 ];
 

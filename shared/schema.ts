@@ -26,6 +26,7 @@ export const companies = mysqlTable("companies", {
   responsibleName: varchar("responsible_name", { length: 255 }),
   responsiblePhone: varchar("responsible_phone", { length: 20 }),
   responsibleEmail: varchar("responsible_email", { length: 255 }),
+  planId: varchar("plan_id", { length: 36 }),
   status: varchar("status", { length: 20 }).notNull().default("active"),
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
@@ -325,6 +326,17 @@ export const companyTestimonials = mysqlTable("company_testimonials", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
+// Plans Table
+export const plans = mysqlTable("plans", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+  name: varchar("name", { length: 255 }).notNull(),
+  price: decimal("price", { precision: 10, scale: 2 }).notNull(),
+  agentLimit: int("agent_limit").notNull().default(1),
+  isActive: boolean("is_active").default(true),
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
   email: true,
@@ -345,6 +357,8 @@ export const insertCompanySchema = createInsertSchema(companies).pick({
   responsibleName: true,
   responsiblePhone: true,
   responsibleEmail: true,
+  planId: true,
+  status: true,
 });
 
 export const insertCompanyCustomDomainSchema = createInsertSchema(companyCustomDomains).pick({
@@ -584,6 +598,13 @@ export const insertCompanyTestimonialSchema = createInsertSchema(companyTestimon
   isActive: true,
 });
 
+export const insertPlanSchema = createInsertSchema(plans).pick({
+  name: true,
+  price: true,
+  agentLimit: true,
+  isActive: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -631,3 +652,5 @@ export type CompanyAgent = typeof companyAgents.$inferSelect;
 export type InsertCompanyAgent = z.infer<typeof insertCompanyAgentSchema>;
 export type CompanyTestimonial = typeof companyTestimonials.$inferSelect;
 export type InsertCompanyTestimonial = z.infer<typeof insertCompanyTestimonialSchema>;
+export type Plan = typeof plans.$inferSelect;
+export type InsertPlan = z.infer<typeof insertPlanSchema>;
