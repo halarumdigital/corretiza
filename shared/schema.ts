@@ -223,6 +223,7 @@ export const leads = mysqlTable("leads", {
   notes: text("notes"),
   interestedCityId: varchar("interested_city_id", { length: 36 }), // City the lead is interested in
   interestedPropertyType: varchar("interested_property_type", { length: 50 }), // 'casa' | 'apartamento' | 'sala' | 'terreno' | 'sobrado' | 'chácara'
+  interestedTransactionType: varchar("interested_transaction_type", { length: 20 }), // 'venda' | 'aluguel'
   convertedToCustomer: boolean("converted_to_customer").default(false),
   customerId: varchar("customer_id", { length: 36 }), // Link to customer if converted
   createdAt: timestamp("created_at").defaultNow(),
@@ -504,6 +505,7 @@ export const insertLeadSchema = createInsertSchema(leads).pick({
   notes: true,
   interestedCityId: true,
   interestedPropertyType: true,
+  interestedTransactionType: true,
   convertedToCustomer: true,
   customerId: true,
 });

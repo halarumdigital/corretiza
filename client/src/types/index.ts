@@ -127,10 +127,28 @@ export interface AdminStats {
   todayConversations: number;
 }
 
+export interface MetricValue {
+  value: number;
+  change: number;
+}
+
 export interface ClientStats {
   activeInstances: number;
   aiAgents: number;
-  todayConversations: number;
+  leadsToday: MetricValue;
+  scheduledMeetings: MetricValue;
+  conversationsToday: MetricValue;
+}
+
+export interface RankingItem {
+  rank: number;
+  name: string;
+  value: number;
+}
+
+export interface DashboardCharts {
+  propertyTypes: RankingItem[];
+  transactionTypes: RankingItem[];
 }
 
 export interface FunnelStage {

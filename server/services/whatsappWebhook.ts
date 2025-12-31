@@ -360,7 +360,8 @@ export class WhatsAppWebhookService {
       }
 
       // Extrair o número do remetente CORRETO da mensagem - usar data.key.remoteJid
-      const senderPhone = (evolutionData.data as any).key?.remoteJid?.replace('@s.whatsapp.net', '');
+      // Remover sufixos @s.whatsapp.net e @lid do número
+      const senderPhone = (evolutionData.data as any).key?.remoteJid?.replace(/@(s\.whatsapp\.net|lid)$/g, '');
       if (!senderPhone) {
         console.log("❌ Could not extract sender phone from Evolution message");
         console.log("❌ Debug - data.key:", (evolutionData.data as any).key);
@@ -841,8 +842,8 @@ export class WhatsAppWebhookService {
       return null;
     }
 
-    // Remover sufixo @s.whatsapp.net se presente
-    return remoteJid.replace('@s.whatsapp.net', '');
+    // Remover sufixos @s.whatsapp.net e @lid do número
+    return remoteJid.replace(/@(s\.whatsapp\.net|lid)$/g, '');
   }
 
   private async sendResponse(instanceId: string, phone: string, response: string, userMessage?: string, companyId?: string): Promise<void> {

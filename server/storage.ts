@@ -2092,9 +2092,9 @@ export class MySQLStorage implements IStorage {
     await this.connection.execute(
       `INSERT INTO leads (
         id, company_id, name, phone, email, source, status, notes,
-        interested_city_id, interested_property_type,
+        interested_city_id, interested_property_type, interested_transaction_type,
         converted_to_customer, customer_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())`,
       [
         id,
         lead.companyId,
@@ -2106,6 +2106,7 @@ export class MySQLStorage implements IStorage {
         lead.notes || null,
         lead.interestedCityId || null,
         lead.interestedPropertyType || null,
+        lead.interestedTransactionType || null,
         lead.convertedToCustomer || false,
         lead.customerId || null
       ]
@@ -2165,6 +2166,10 @@ export class MySQLStorage implements IStorage {
       setClause.push('interested_property_type = ?');
       values.push(updates.interestedPropertyType);
     }
+    if ((updates as any).interestedTransactionType !== undefined) {
+      setClause.push('interested_transaction_type = ?');
+      values.push((updates as any).interestedTransactionType);
+    }
 
     setClause.push('updated_at = NOW()');
     values.push(id);
@@ -2200,6 +2205,7 @@ export class MySQLStorage implements IStorage {
       notes: row.notes,
       interestedCityId: row.interested_city_id,
       interestedPropertyType: row.interested_property_type,
+      interestedTransactionType: row.interested_transaction_type,
       convertedToCustomer: row.converted_to_customer,
       customerId: row.customer_id,
       createdAt: row.created_at,

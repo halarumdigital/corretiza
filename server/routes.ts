@@ -3378,17 +3378,165 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return res.status(404).json({ error: "Empresa não encontrada" });
       }
 
-      const instances = await storage.getWhatsappInstancesByCompany(req.user.companyId);
-      const agents = await storage.getAiAgentsByCompany(req.user.companyId);
+      const companyId = req.user.companyId;
+      const instances = await storage.getWhatsappInstancesByCompany(companyId);
+      const agents = await storage.getAiAgentsByCompany(companyId);
+      const leads = await storage.getLeadsByCompany(companyId);
+
+      // Parse date range from query parameters
+      const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+      // Define period dates
+      const now = new Date();
+      let periodStart: Date;
+      let periodEnd: Date;
+
+      if (startDate && endDate) {
+        periodStart = new Date(startDate);
+        periodStart.setHours(0, 0, 0, 0);
+        periodEnd = new Date(endDate);
+        periodEnd.setHours(23, 59, 59, 999);
+      } else {
+        // Default to today
+        periodStart = new Date(now);
+        periodStart.setHours(0, 0, 0, 0);
+        periodEnd = new Date(now);
+        periodEnd.setHours(23, 59, 59, 999);
+      }
+
+      // Calculate previous period (same duration before the selected period)
+      const periodDuration = periodEnd.getTime() - periodStart.getTime();
+      const prevPeriodEnd = new Date(periodStart.getTime() - 1);
+      const prevPeriodStart = new Date(prevPeriodEnd.getTime() - periodDuration);
+      prevPeriodStart.setHours(0, 0, 0, 0);
+
+      // Leads do período selecionado e período anterior
+      const leadsPeriod = leads.filter(l => {
+        if (!l.createdAt) return false;
+        const createdAt = new Date(l.createdAt);
+        return createdAt >= periodStart && createdAt <= periodEnd;
+      }).length;
+
+      const leadsPrevPeriod = leads.filter(l => {
+        if (!l.createdAt) return false;
+        const createdAt = new Date(l.createdAt);
+        return createdAt >= prevPeriodStart && createdAt <= prevPeriodEnd;
+      }).length;
+
+      // Buscar conversas de todas as instâncias
+      let allConversations: any[] = [];
+      for (const instance of instances) {
+        const convs = await storage.getConversationsByInstance(instance.id);
+        allConversations = [...allConversations, ...convs];
+      }
+
+      // Conversas do período selecionado e período anterior
+      const conversationsPeriod = allConversations.filter(c => {
+        if (!c.createdAt) return false;
+        const createdAt = new Date(c.createdAt);
+        return createdAt >= periodStart && createdAt <= periodEnd;
+      }).length;
+
+      const conversationsPrevPeriod = allConversations.filter(c => {
+        if (!c.createdAt) return false;
+        const createdAt = new Date(c.createdAt);
+        return createdAt >= prevPeriodStart && createdAt <= prevPeriodEnd;
+      }).length;
+
+      // Calcular variação percentual
+      const calcChange = (current: number, previous: number): number => {
+        if (previous === 0) return current > 0 ? 100 : 0;
+        return Number((((current - previous) / previous) * 100).toFixed(1));
+      };
 
       res.json({
         activeInstances: instances.filter(i => i.status === 'connected').length,
         aiAgents: agents.length,
-        todayConversations: 0 // This would need more complex querying
+        leadsToday: { value: leadsPeriod, change: calcChange(leadsPeriod, leadsPrevPeriod) },
+        scheduledMeetings: { value: 0, change: 0 }, // Funcionalidade futura
+        conversationsToday: { value: conversationsPeriod, change: calcChange(conversationsPeriod, conversationsPrevPeriod) }
       });
     } catch (error) {
       console.error("Get client stats error:", error);
       res.status(500).json({ error: "Erro ao buscar estatísticas" });
+    }
+  });
+
+  // Dashboard charts data - Property types and transaction demand from leads
+  app.get("/api/client/dashboard-charts", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.companyId) {
+        return res.status(404).json({ error: "Empresa não encontrada" });
+      }
+
+      const allLeads = await storage.getLeadsByCompany(req.user.companyId);
+
+      // Parse date range from query parameters
+      const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
+
+      // Define period dates
+      const now = new Date();
+      let periodStart: Date;
+      let periodEnd: Date;
+
+      if (startDate && endDate) {
+        periodStart = new Date(startDate);
+        periodStart.setHours(0, 0, 0, 0);
+        periodEnd = new Date(endDate);
+        periodEnd.setHours(23, 59, 59, 999);
+      } else {
+        // Default to today
+        periodStart = new Date(now);
+        periodStart.setHours(0, 0, 0, 0);
+        periodEnd = new Date(now);
+        periodEnd.setHours(23, 59, 59, 999);
+      }
+
+      // Filter leads by date range
+      const leads = allLeads.filter(lead => {
+        if (!lead.createdAt) return false;
+        const createdAt = new Date(lead.createdAt);
+        return createdAt >= periodStart && createdAt <= periodEnd;
+      });
+
+      // Agregar por tipo de imóvel
+      const propertyTypeCounts: Record<string, number> = {};
+      leads.forEach(lead => {
+        if (lead.interestedPropertyType) {
+          const type = lead.interestedPropertyType;
+          propertyTypeCounts[type] = (propertyTypeCounts[type] || 0) + 1;
+        }
+      });
+
+      // Converter para array ordenado
+      const propertyTypes = Object.entries(propertyTypeCounts)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value)
+        .slice(0, 4)
+        .map((item, index) => ({ rank: index + 1, name: item.name, value: item.value }));
+
+      // Agregar por tipo de transação
+      const transactionTypeCounts: Record<string, number> = {};
+      leads.forEach(lead => {
+        if ((lead as any).interestedTransactionType) {
+          const type = (lead as any).interestedTransactionType;
+          transactionTypeCounts[type] = (transactionTypeCounts[type] || 0) + 1;
+        }
+      });
+
+      // Converter para array ordenado
+      const transactionTypes = Object.entries(transactionTypeCounts)
+        .map(([name, value]) => ({ name, value }))
+        .sort((a, b) => b.value - a.value)
+        .map((item, index) => ({ rank: index + 1, name: item.name, value: item.value }));
+
+      res.json({
+        propertyTypes,
+        transactionTypes
+      });
+    } catch (error) {
+      console.error("Get dashboard charts error:", error);
+      res.status(500).json({ error: "Erro ao buscar dados dos gráficos" });
     }
   });
 

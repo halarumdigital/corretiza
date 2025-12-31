@@ -50,7 +50,8 @@
       "Bash(pkill:*)",
       "Bash(bash -c 'source ~/.nvm/nvm.sh && mysql -u root -proot imobiliaria -e \"DESCRIBE properties;\" 2>/dev/null':*)",
       "Bash(bash -c:*)",
-      "Bash(python3:*)"
+      "Bash(python3:*)",
+      "Bash(/home/gilliard/.nvm/versions/node/v22.15.0/bin/npm run check)"
     ],
     "deny": [],
     "ask": []
