@@ -25,7 +25,7 @@ import {
   insertAiAgentSchema, insertConversationSchema, insertMessageSchema,
   insertContactListSchema, insertContactListItemSchema, insertScheduledMessageSchema,
   insertCustomerSchema, insertLeadSchema, insertPropertySchema,
-  insertCompanyCustomDomainSchema, insertPlanSchema, insertBrokerSchema
+  insertCompanyCustomDomainSchema, insertPlanSchema, insertBrokerSchema, insertAppointmentSchema
 } from "@shared/schema";
 import { getEmailService } from "./services/emailService";
 
@@ -787,6 +787,124 @@ export async function registerRoutes(app: Express): Promise<Server> {
     } catch (error) {
       console.error("Error deleting broker:", error);
       res.status(500).json({ error: "Erro ao deletar corretor" });
+    }
+  });
+
+  // Appointments (Agendamentos) - Client routes
+  app.get("/api/appointments", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.companyId) {
+        return res.status(400).json({ error: "Company ID não encontrado" });
+      }
+
+      const appointments = await storage.getAppointmentsByCompany(req.user.companyId);
+      res.json(appointments);
+    } catch (error) {
+      console.error("Error fetching appointments:", error);
+      res.status(500).json({ error: "Erro ao buscar agendamentos" });
+    }
+  });
+
+  app.get("/api/appointments/broker/:brokerId", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.companyId) {
+        return res.status(400).json({ error: "Company ID não encontrado" });
+      }
+
+      const { brokerId } = req.params;
+
+      // Verificar se o corretor pertence à empresa
+      const broker = await storage.getBroker(brokerId);
+      if (!broker || broker.companyId !== req.user.companyId) {
+        return res.status(403).json({ error: "Sem permissão para acessar agendamentos deste corretor" });
+      }
+
+      const appointments = await storage.getAppointmentsByBroker(brokerId);
+      res.json(appointments);
+    } catch (error) {
+      console.error("Error fetching broker appointments:", error);
+      res.status(500).json({ error: "Erro ao buscar agendamentos do corretor" });
+    }
+  });
+
+  app.get("/api/appointments/:id", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+
+      const appointment = await storage.getAppointment(id);
+      if (!appointment) {
+        return res.status(404).json({ error: "Agendamento não encontrado" });
+      }
+
+      if (appointment.companyId !== req.user?.companyId) {
+        return res.status(403).json({ error: "Sem permissão para acessar este agendamento" });
+      }
+
+      res.json(appointment);
+    } catch (error) {
+      console.error("Error fetching appointment:", error);
+      res.status(500).json({ error: "Erro ao buscar agendamento" });
+    }
+  });
+
+  app.post("/api/appointments", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      if (!req.user?.companyId) {
+        return res.status(400).json({ error: "Company ID não encontrado" });
+      }
+
+      const validatedData = insertAppointmentSchema.parse({
+        ...req.body,
+        companyId: req.user.companyId
+      });
+      const appointment = await storage.createAppointment(validatedData);
+      res.status(201).json(appointment);
+    } catch (error) {
+      console.error("Error creating appointment:", error);
+      res.status(500).json({ error: "Erro ao criar agendamento" });
+    }
+  });
+
+  app.put("/api/appointments/:id", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+
+      const appointment = await storage.getAppointment(id);
+      if (!appointment) {
+        return res.status(404).json({ error: "Agendamento não encontrado" });
+      }
+
+      if (appointment.companyId !== req.user?.companyId) {
+        return res.status(403).json({ error: "Sem permissão para editar este agendamento" });
+      }
+
+      const validatedData = insertAppointmentSchema.partial().parse(req.body);
+      const updatedAppointment = await storage.updateAppointment(id, validatedData);
+      res.json(updatedAppointment);
+    } catch (error) {
+      console.error("Error updating appointment:", error);
+      res.status(500).json({ error: "Erro ao atualizar agendamento" });
+    }
+  });
+
+  app.delete("/api/appointments/:id", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+
+      const appointment = await storage.getAppointment(id);
+      if (!appointment) {
+        return res.status(404).json({ error: "Agendamento não encontrado" });
+      }
+
+      if (appointment.companyId !== req.user?.companyId) {
+        return res.status(403).json({ error: "Sem permissão para excluir este agendamento" });
+      }
+
+      await storage.deleteAppointment(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Error deleting appointment:", error);
+      res.status(500).json({ error: "Erro ao deletar agendamento" });
     }
   });
 

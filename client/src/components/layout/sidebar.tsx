@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Building, Settings, Waypoints, Bot, Users,
   LayoutDashboard, User, MessageSquare,
-  MessageCircle, LogOut, ChevronDown, ChevronRight, Send, List, Globe, Home, UserPlus, Sparkles, MapPin, CreditCard
+  MessageCircle, LogOut, ChevronDown, ChevronRight, Send, List, Globe, Home, UserPlus, Sparkles, MapPin, CreditCard, Calendar
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GlobalConfiguration } from "@/types";
@@ -59,6 +59,7 @@ const clientNavItems: NavItem[] = [
     ]
   },
   { href: "/client/corretores", label: "Corretores", icon: <User className="w-5 h-5" /> },
+  { href: "/client/calendario", label: "Calendario", icon: <Calendar className="w-5 h-5" /> },
   {
     label: "Website",
     icon: <Globe className="w-5 h-5" />,

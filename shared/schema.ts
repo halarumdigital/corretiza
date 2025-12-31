@@ -350,6 +350,24 @@ export const brokers = mysqlTable("brokers", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
+// Appointments Table (Agendamentos de Visitas)
+export const appointments = mysqlTable("appointments", {
+  id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+  companyId: varchar("company_id", { length: 36 }).notNull(),
+  brokerId: varchar("broker_id", { length: 36 }), // Corretor responsável
+  propertyId: varchar("property_id", { length: 36 }), // Imóvel de interesse
+  clientName: varchar("client_name", { length: 255 }).notNull(), // Nome do cliente
+  clientPhone: varchar("client_phone", { length: 20 }).notNull(), // Telefone do cliente
+  propertyInterest: text("property_interest"), // Descrição do imóvel de interesse (texto livre)
+  scheduledDate: timestamp("scheduled_date"), // Data agendada para visita
+  status: varchar("status", { length: 20 }).default("pendente"), // 'pendente' | 'confirmado' | 'realizado' | 'cancelado'
+  notes: text("notes"), // Observações
+  source: varchar("source", { length: 50 }).default("whatsapp"), // 'whatsapp' | 'manual' | 'website'
+  conversationId: varchar("conversation_id", { length: 36 }), // Link para conversa do WhatsApp
+  createdAt: timestamp("created_at").defaultNow(),
+  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
+});
+
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
   email: true,
@@ -629,6 +647,20 @@ export const insertBrokerSchema = createInsertSchema(brokers).pick({
   whatsapp: true,
 });
 
+export const insertAppointmentSchema = createInsertSchema(appointments).pick({
+  companyId: true,
+  brokerId: true,
+  propertyId: true,
+  clientName: true,
+  clientPhone: true,
+  propertyInterest: true,
+  scheduledDate: true,
+  status: true,
+  notes: true,
+  source: true,
+  conversationId: true,
+});
+
 // Types
 export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
@@ -680,3 +712,5 @@ export type Plan = typeof plans.$inferSelect;
 export type InsertPlan = z.infer<typeof insertPlanSchema>;
 export type Broker = typeof brokers.$inferSelect;
 export type InsertBroker = z.infer<typeof insertBrokerSchema>;
+export type Appointment = typeof appointments.$inferSelect;
+export type InsertAppointment = z.infer<typeof insertAppointmentSchema>;

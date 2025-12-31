@@ -10,7 +10,7 @@ import {
   Amenity, InsertAmenity, City, InsertCity, CompanyCustomDomain, InsertCompanyCustomDomain,
   WebsiteTemplate, InsertWebsiteTemplate, CompanyWebsite, InsertCompanyWebsite,
   CompanyAgent, InsertCompanyAgent, CompanyTestimonial, InsertCompanyTestimonial,
-  Plan, InsertPlan, Broker, InsertBroker
+  Plan, InsertPlan, Broker, InsertBroker, Appointment, InsertAppointment
 } from "@shared/schema";
 import { randomUUID } from "crypto";
 
@@ -192,6 +192,14 @@ export interface IStorage {
   createBroker(broker: InsertBroker): Promise<Broker>;
   updateBroker(id: string, updates: Partial<Broker>): Promise<Broker>;
   deleteBroker(id: string): Promise<void>;
+
+  // Appointments (Agendamentos)
+  getAppointment(id: string): Promise<Appointment | undefined>;
+  getAppointmentsByCompany(companyId: string): Promise<Appointment[]>;
+  getAppointmentsByBroker(brokerId: string): Promise<Appointment[]>;
+  createAppointment(appointment: InsertAppointment): Promise<Appointment>;
+  updateAppointment(id: string, updates: Partial<Appointment>): Promise<Appointment>;
+  deleteAppointment(id: string): Promise<void>;
 }
 
 export class MySQLStorage implements IStorage {
@@ -3439,6 +3447,156 @@ export class MySQLStorage implements IStorage {
       name: row.name,
       email: row.email,
       whatsapp: row.whatsapp,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  // ========== APPOINTMENTS (AGENDAMENTOS) ==========
+
+  async getAppointment(id: string): Promise<Appointment | undefined> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM appointments WHERE id = ?',
+      [id]
+    );
+
+    const appointments = rows as any[];
+    if (appointments.length === 0) return undefined;
+
+    return this.mapAppointmentRow(appointments[0]);
+  }
+
+  async getAppointmentsByCompany(companyId: string): Promise<Appointment[]> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM appointments WHERE company_id = ? ORDER BY created_at DESC',
+      [companyId]
+    );
+
+    return (rows as any[]).map(row => this.mapAppointmentRow(row));
+  }
+
+  async getAppointmentsByBroker(brokerId: string): Promise<Appointment[]> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM appointments WHERE broker_id = ? ORDER BY scheduled_date DESC',
+      [brokerId]
+    );
+
+    return (rows as any[]).map(row => this.mapAppointmentRow(row));
+  }
+
+  async createAppointment(appointment: InsertAppointment): Promise<Appointment> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const id = randomUUID();
+    await this.connection.execute(
+      `INSERT INTO appointments (id, company_id, broker_id, property_id, client_name, client_phone, property_interest, scheduled_date, status, notes, source, conversation_id)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        id,
+        appointment.companyId,
+        appointment.brokerId || null,
+        appointment.propertyId || null,
+        appointment.clientName,
+        appointment.clientPhone,
+        appointment.propertyInterest || null,
+        appointment.scheduledDate || null,
+        appointment.status || 'pendente',
+        appointment.notes || null,
+        appointment.source || 'whatsapp',
+        appointment.conversationId || null
+      ]
+    );
+
+    const created = await this.getAppointment(id);
+    if (!created) throw new Error('Failed to create appointment');
+    return created;
+  }
+
+  async updateAppointment(id: string, updates: Partial<Appointment>): Promise<Appointment> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const setClauses: string[] = [];
+    const values: any[] = [];
+
+    if (updates.brokerId !== undefined) {
+      setClauses.push('broker_id = ?');
+      values.push(updates.brokerId);
+    }
+    if (updates.propertyId !== undefined) {
+      setClauses.push('property_id = ?');
+      values.push(updates.propertyId);
+    }
+    if (updates.clientName !== undefined) {
+      setClauses.push('client_name = ?');
+      values.push(updates.clientName);
+    }
+    if (updates.clientPhone !== undefined) {
+      setClauses.push('client_phone = ?');
+      values.push(updates.clientPhone);
+    }
+    if (updates.propertyInterest !== undefined) {
+      setClauses.push('property_interest = ?');
+      values.push(updates.propertyInterest);
+    }
+    if (updates.scheduledDate !== undefined) {
+      setClauses.push('scheduled_date = ?');
+      values.push(updates.scheduledDate);
+    }
+    if (updates.status !== undefined) {
+      setClauses.push('status = ?');
+      values.push(updates.status);
+    }
+    if (updates.notes !== undefined) {
+      setClauses.push('notes = ?');
+      values.push(updates.notes);
+    }
+
+    if (setClauses.length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    setClauses.push('updated_at = NOW()');
+    values.push(id);
+
+    await this.connection.execute(
+      `UPDATE appointments SET ${setClauses.join(', ')} WHERE id = ?`,
+      values
+    );
+
+    const updated = await this.getAppointment(id);
+    if (!updated) throw new Error('Appointment not found');
+    return updated;
+  }
+
+  async deleteAppointment(id: string): Promise<void> {
+    if (!this.connection) throw new Error('No database connection');
+
+    await this.connection.execute(
+      'DELETE FROM appointments WHERE id = ?',
+      [id]
+    );
+  }
+
+  private mapAppointmentRow(row: any): Appointment {
+    return {
+      id: row.id,
+      companyId: row.company_id,
+      brokerId: row.broker_id,
+      propertyId: row.property_id,
+      clientName: row.client_name,
+      clientPhone: row.client_phone,
+      propertyInterest: row.property_interest,
+      scheduledDate: row.scheduled_date,
+      status: row.status,
+      notes: row.notes,
+      source: row.source,
+      conversationId: row.conversation_id,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

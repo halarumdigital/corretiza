@@ -609,7 +609,25 @@ Se o usuário mencionou QUALQUER tipo de imóvel E/OU cidade, você DEVE chamar 
 NÃO faça perguntas adicionais, NÃO peça esclarecimentos, NÃO diga que vai procurar.
 SIMPLESMENTE CHAME A FUNÇÃO com os parâmetros que você conseguiu identificar!
 
-Responda sempre em português brasileiro de forma natural e helpful.\n\n`;
+Responda sempre em português brasileiro de forma natural e helpful.
+
+📅 REGRAS SOBRE AGENDAMENTO DE VISITAS:
+Quando o usuário demonstrar interesse em visitar um imóvel, você DEVE usar a função agendar_visita.
+Sinais de que o usuário quer agendar:
+- "Quero visitar", "posso visitar", "gostaria de conhecer"
+- "Quero agendar", "marcar visita", "marcar horário"
+- "Quando posso ir ver", "como faço para visitar"
+- "Tenho interesse", "quero ver pessoalmente"
+
+Antes de chamar agendar_visita, você precisa ter:
+1. Nome do cliente (pode usar o nome do WhatsApp se disponível)
+2. Telefone (já temos do WhatsApp)
+3. Qual imóvel deseja visitar (código, nome ou descrição)
+
+Se faltar alguma informação, pergunte ao usuário antes de agendar.
+Exemplo: "Para agendar sua visita, preciso confirmar seu nome completo. Como devo te chamar?"
+
+Após criar o agendamento, informe que um corretor entrará em contato para confirmar o horário.\n\n`;
       systemPrompt += `IMPORTANTE: SEMPRE siga o prompt e personalidade definidos no início desta mensagem. Não mude seu comportamento ou tom.`;
 
       // PRÉ-PROCESSAR: Detectar cidade e tipo no histórico para evitar loops
@@ -785,6 +803,35 @@ Responda sempre em português brasileiro de forma natural e helpful.\n\n`;
                 }
               },
               required: []
+            }
+          }
+        },
+        {
+          type: "function" as const,
+          function: {
+            name: "agendar_visita",
+            description: "Use esta função quando o usuário confirmar interesse em agendar uma visita a um imóvel. Coleta os dados do cliente (nome, telefone) e cria um agendamento. Chame esta função quando o usuário disser que quer visitar, agendar visita, conhecer o imóvel pessoalmente, marcar horário para ver o imóvel, etc.",
+            parameters: {
+              type: "object",
+              properties: {
+                nome_cliente: {
+                  type: "string",
+                  description: "Nome completo do cliente que deseja agendar a visita. Se já souber o nome do pushName ou histórico, use-o. Caso contrário, pergunte ao usuário."
+                },
+                telefone_cliente: {
+                  type: "string",
+                  description: "Telefone do cliente para contato. Pode ser extraído do número do WhatsApp atual ou informado pelo usuário."
+                },
+                imovel_interesse: {
+                  type: "string",
+                  description: "Descrição ou código do imóvel que o cliente deseja visitar. Pode ser o nome, código, endereço ou descrição do imóvel discutido na conversa."
+                },
+                observacoes: {
+                  type: "string",
+                  description: "Observações adicionais sobre o agendamento, preferências de horário, etc."
+                }
+              },
+              required: ["nome_cliente", "telefone_cliente", "imovel_interesse"]
             }
           }
         }
@@ -1132,6 +1179,120 @@ Responda sempre em português brasileiro de forma natural e helpful.\n\n`;
           } catch (error) {
             console.error(`❌ [FUNCTION_CALL] Erro ao executar busca_imoveis:`, error);
             return { text: "Desculpe, ocorreu um erro ao buscar os imóveis. Tente novamente." };
+          }
+        } else if (functionName === "agendar_visita") {
+          // ========== FUNÇÃO: AGENDAR VISITA ==========
+          try {
+            console.log(`📅 [AGENDAR_VISITA] Iniciando agendamento de visita...`);
+            console.log(`📅 [AGENDAR_VISITA] Argumentos recebidos:`, JSON.stringify(functionArgs, null, 2));
+
+            // Buscar instância para obter companyId
+            let instanceForAppointment = await storage.getWhatsappInstanceByEvolutionId(context.instanceId);
+            if (!instanceForAppointment && (context as any).databaseInstanceId) {
+              instanceForAppointment = await storage.getWhatsappInstance((context as any).databaseInstanceId);
+            }
+
+            if (!instanceForAppointment?.companyId) {
+              throw new Error('Instância ou companyId não encontrado');
+            }
+
+            console.log(`🏢 [AGENDAR_VISITA] CompanyId: ${instanceForAppointment.companyId}`);
+
+            // Extrair dados do agendamento
+            const nomeCliente = functionArgs.nome_cliente || context.pushName || 'Cliente WhatsApp';
+            const telefoneCliente = functionArgs.telefone_cliente || context.phone;
+            const imovelInteresse = functionArgs.imovel_interesse || 'Imóvel não especificado';
+            const observacoes = functionArgs.observacoes || null;
+
+            console.log(`📅 [AGENDAR_VISITA] Dados do agendamento:`);
+            console.log(`   Nome: ${nomeCliente}`);
+            console.log(`   Telefone: ${telefoneCliente}`);
+            console.log(`   Imóvel: ${imovelInteresse}`);
+            console.log(`   Observações: ${observacoes || 'Nenhuma'}`);
+
+            // Buscar um corretor aleatório da empresa para atribuir o agendamento
+            const brokers = await storage.getBrokersByCompany(instanceForAppointment.companyId);
+            let brokerId: string | null = null;
+            let brokerName: string | null = null;
+
+            if (brokers.length > 0) {
+              // Selecionar corretor aleatório (distribuição simples)
+              const randomIndex = Math.floor(Math.random() * brokers.length);
+              brokerId = brokers[randomIndex].id;
+              brokerName = brokers[randomIndex].name;
+              console.log(`👤 [AGENDAR_VISITA] Corretor atribuído: ${brokerName} (ID: ${brokerId})`);
+            } else {
+              console.log(`⚠️ [AGENDAR_VISITA] Nenhum corretor cadastrado - agendamento sem corretor`);
+            }
+
+            // Buscar conversationId se disponível
+            let conversationId: string | null = null;
+            try {
+              const dbInstanceId = (context as any).databaseInstanceId || context.instanceId;
+              const conversations = await storage.getConversationsByInstance(dbInstanceId);
+              const conversation = conversations.find(c => c.contactPhone === context.phone);
+              if (conversation) {
+                conversationId = conversation.id;
+              }
+            } catch (e) {
+              console.log(`⚠️ [AGENDAR_VISITA] Não foi possível obter conversationId`);
+            }
+
+            // Criar o agendamento
+            const newAppointment = await storage.createAppointment({
+              companyId: instanceForAppointment.companyId,
+              brokerId: brokerId,
+              propertyId: null, // Poderia buscar pelo código do imóvel
+              clientName: nomeCliente,
+              clientPhone: telefoneCliente,
+              propertyInterest: imovelInteresse,
+              scheduledDate: null, // Será definido posteriormente
+              status: 'pendente',
+              notes: observacoes,
+              source: 'whatsapp',
+              conversationId: conversationId
+            });
+
+            console.log(`✅ [AGENDAR_VISITA] Agendamento criado com sucesso! ID: ${newAppointment.id}`);
+
+            // Preparar resultado para o modelo
+            const appointmentResult = {
+              sucesso: true,
+              agendamento_id: newAppointment.id,
+              nome_cliente: nomeCliente,
+              telefone: telefoneCliente,
+              imovel: imovelInteresse,
+              corretor: brokerName || 'A definir',
+              status: 'pendente',
+              mensagem: brokerName
+                ? `Agendamento criado com sucesso! O corretor ${brokerName} entrará em contato para confirmar o melhor horário para a visita.`
+                : `Agendamento criado com sucesso! Nossa equipe entrará em contato para confirmar o melhor horário para a visita.`
+            };
+
+            // Adicionar resposta da função e fazer nova chamada
+            messages.push(responseMessage);
+            messages.push({
+              role: "tool" as const,
+              tool_call_id: toolCall.id,
+              content: JSON.stringify(appointmentResult)
+            });
+
+            const finalResponse = await openai.chat.completions.create({
+              model: "gpt-4o",
+              messages: messages,
+              max_tokens: 200,
+              temperature: 0.5,
+            });
+
+            console.log(`✅ [AGENDAR_VISITA] Resposta final gerada`);
+
+            return {
+              text: finalResponse.choices[0].message.content || appointmentResult.mensagem
+            };
+
+          } catch (error) {
+            console.error(`❌ [AGENDAR_VISITA] Erro ao criar agendamento:`, error);
+            return { text: "Desculpe, ocorreu um erro ao criar o agendamento. Por favor, tente novamente ou entre em contato diretamente conosco." };
           }
         }
       }

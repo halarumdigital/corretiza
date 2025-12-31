@@ -34,6 +34,7 @@ import MeusImoveis from "@/pages/client/meus-imoveis";
 import Amenities from "@/pages/client/amenities";
 import Cities from "@/pages/client/cities";
 import Brokers from "@/pages/client/brokers";
+import Calendar from "@/pages/client/calendar";
 import Domains from "@/pages/client/domains";
 import WebsiteConfig from "@/pages/client/website-config";
 import Agents from "@/pages/client/agents";
@@ -261,6 +262,14 @@ function Router() {
           requiredRole="client"
           title="Corretores"
           subtitle="Gerencie sua equipe de corretores"
+        />
+      </Route>
+      <Route path="/client/calendario">
+        <ProtectedRoute
+          component={Calendar}
+          requiredRole="client"
+          title="Calendario"
+          subtitle="Calendario de agendamentos"
         />
       </Route>
       <Route path="/client/domains">
