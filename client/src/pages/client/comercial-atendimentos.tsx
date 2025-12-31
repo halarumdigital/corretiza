@@ -87,6 +87,7 @@ export default function ComercialAtendimentos() {
   }, [customers]);
 
   // Create Kanban columns based on funnel stages
+  const activeStageIds = funnelStages.filter(stage => stage.isActive).map(stage => stage.id);
   const kanbanColumns: KanbanColumn[] = funnelStages
     .filter(stage => stage.isActive)
     .map(stage => ({
@@ -94,10 +95,16 @@ export default function ComercialAtendimentos() {
       customers: localCustomers.filter(customer => customer.funnelStageId === stage.id)
     }));
 
-  // Add customers without stage to first column
-  const customersWithoutStage = localCustomers.filter(customer => !customer.funnelStageId);
-  if (kanbanColumns.length > 0 && customersWithoutStage.length > 0) {
-    kanbanColumns[0].customers = [...kanbanColumns[0].customers, ...customersWithoutStage];
+  // Add customers without stage OR with invalid/old stage to first column
+  const customersWithoutValidStage = localCustomers.filter(customer =>
+    !customer.funnelStageId || !activeStageIds.includes(customer.funnelStageId)
+  );
+  if (kanbanColumns.length > 0 && customersWithoutValidStage.length > 0) {
+    // Filter out customers already assigned to valid stages
+    const customersToAdd = customersWithoutValidStage.filter(c =>
+      !kanbanColumns.some(col => col.customers.some(existing => existing.id === c.id))
+    );
+    kanbanColumns[0].customers = [...kanbanColumns[0].customers, ...customersToAdd];
   }
 
   const editCustomerMutation = useMutation({
@@ -392,25 +399,40 @@ export default function ComercialAtendimentos() {
   const handleDrop = (e: React.DragEvent, targetStageId: string) => {
     e.preventDefault();
     setDragOverColumn(null);
-    
+
     if (draggedCustomer && draggedCustomer.funnelStageId !== targetStageId) {
-      // Atualizar o estado local dos clientes
-      setLocalCustomers(prev => prev.map(customer => 
-        customer.id === draggedCustomer.id 
+      // Atualizar o estado local dos clientes (otimistic update)
+      setLocalCustomers(prev => prev.map(customer =>
+        customer.id === draggedCustomer.id
           ? { ...customer, funnelStageId: targetStageId }
           : customer
       ));
-      
-      // Mostrar notificação de sucesso
-      const targetStage = funnelStages.find(s => s.id === targetStageId);
-      toast({
-        title: "Cliente movido",
-        description: `${draggedCustomer.name} foi movido para ${targetStage?.name}`,
+
+      // Persistir a mudança no banco de dados
+      editCustomerMutation.mutate({
+        id: draggedCustomer.id,
+        funnelStageId: targetStageId,
+      }, {
+        onSuccess: () => {
+          const targetStage = funnelStages.find(s => s.id === targetStageId);
+          toast({
+            title: "Cliente movido",
+            description: `${draggedCustomer.name} foi movido para ${targetStage?.name}`,
+          });
+        },
+        onError: () => {
+          // Reverter a mudança local em caso de erro
+          setLocalCustomers(prev => prev.map(customer =>
+            customer.id === draggedCustomer.id
+              ? { ...customer, funnelStageId: draggedCustomer.funnelStageId }
+              : customer
+          ));
+        }
       });
-      
+
       console.log(`Moving customer ${draggedCustomer.id} to stage ${targetStageId}`);
     }
-    
+
     setDraggedCustomer(null);
   };
 

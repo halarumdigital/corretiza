@@ -94,13 +94,10 @@ export interface IStorage {
   // Additional methods for scheduled message processing
   getWhatsappInstancesByIds(ids: string[]): Promise<WhatsappInstance[]>;
   
-  // Funnel Stages
+  // Funnel Stages (Global - fixed for all companies)
   getFunnelStage(id: string): Promise<FunnelStage | undefined>;
-  getFunnelStagesByCompany(companyId: string): Promise<FunnelStage[]>;
-  createFunnelStage(stage: InsertFunnelStage): Promise<FunnelStage>;
-  updateFunnelStage(id: string, updates: Partial<FunnelStage>): Promise<FunnelStage>;
-  deleteFunnelStage(id: string): Promise<void>;
-  reorderFunnelStage(id: string, direction: 'up' | 'down', companyId: string): Promise<{ success: boolean }>;
+  getGlobalFunnelStages(): Promise<FunnelStage[]>;
+  initializeGlobalFunnelStages(): Promise<void>;
   
   // Customers
   getCustomer(id: string): Promise<Customer | undefined>;
@@ -399,12 +396,13 @@ export class MySQLStorage implements IStorage {
 
       `CREATE TABLE IF NOT EXISTS funnel_stages (
         id VARCHAR(36) PRIMARY KEY DEFAULT (UUID()),
-        company_id VARCHAR(36) NOT NULL,
+        company_id VARCHAR(36) NULL,
         name VARCHAR(255) NOT NULL,
         description TEXT,
         color VARCHAR(7) NOT NULL DEFAULT '#3B82F6',
         \`order\` INT NOT NULL DEFAULT 0,
         is_active BOOLEAN DEFAULT TRUE,
+        is_global BOOLEAN DEFAULT FALSE,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
       )`,
@@ -1770,146 +1768,84 @@ export class MySQLStorage implements IStorage {
     return mappedInstances;
   }
 
-  // Funnel Stages
+  // Funnel Stages (Global - fixed for all companies)
   async getFunnelStage(id: string): Promise<FunnelStage | undefined> {
     if (!this.connection) throw new Error('No database connection');
-    
+
     const [rows] = await this.connection.execute(
       'SELECT * FROM funnel_stages WHERE id = ?',
       [id]
     );
-    
+
     const stages = rows as any[];
     if (stages.length === 0) return undefined;
-    
+
     const stage = stages[0];
     return {
       ...stage,
       companyId: stage.company_id,
       isActive: Boolean(stage.is_active),
+      isGlobal: Boolean(stage.is_global),
       createdAt: stage.created_at,
       updatedAt: stage.updated_at
     } as FunnelStage;
   }
 
-  async getFunnelStagesByCompany(companyId: string): Promise<FunnelStage[]> {
+  async getGlobalFunnelStages(): Promise<FunnelStage[]> {
     if (!this.connection) throw new Error('No database connection');
-    
+
     const [rows] = await this.connection.execute(
-      'SELECT * FROM funnel_stages WHERE company_id = ? ORDER BY `order` ASC',
-      [companyId]
+      'SELECT * FROM funnel_stages WHERE is_global = TRUE AND is_active = TRUE ORDER BY `order` ASC'
     );
-    
+
     const stages = rows as any[];
     return stages.map(stage => ({
       ...stage,
       companyId: stage.company_id,
       isActive: Boolean(stage.is_active),
+      isGlobal: Boolean(stage.is_global),
       createdAt: stage.created_at,
       updatedAt: stage.updated_at
     })) as FunnelStage[];
   }
 
-  async createFunnelStage(stage: InsertFunnelStage): Promise<FunnelStage> {
+  async initializeGlobalFunnelStages(): Promise<void> {
     if (!this.connection) throw new Error('No database connection');
-    
-    const id = randomUUID();
-    await this.connection.execute(
-      'INSERT INTO funnel_stages (id, company_id, name, description, color, `order`, is_active) VALUES (?, ?, ?, ?, ?, ?, ?)',
-      [id, stage.companyId, stage.name, stage.description || null, stage.color || '#3B82F6', stage.order || 1, stage.isActive !== false]
+
+    // Check if global stages already exist
+    const [rows] = await this.connection.execute(
+      'SELECT COUNT(*) as count FROM funnel_stages WHERE is_global = TRUE'
     );
-    
-    const createdStage = await this.getFunnelStage(id);
-    if (!createdStage) throw new Error('Failed to create funnel stage');
-    return createdStage;
-  }
+    const count = (rows as any[])[0].count;
 
-  async updateFunnelStage(id: string, updates: Partial<FunnelStage>): Promise<FunnelStage> {
-    if (!this.connection) throw new Error('No database connection');
-    
-    const fieldMapping: Record<string, string> = {
-      companyId: 'company_id',
-      isActive: 'is_active',
-      createdAt: 'created_at',
-      updatedAt: 'updated_at'
-    };
-    
-    const fields = Object.keys(updates).filter(key => updates[key as keyof FunnelStage] !== undefined);
-    const values = fields.map(key => updates[key as keyof FunnelStage]);
-    
-    if (fields.length > 0) {
-      const setClause = fields.map(field => `${fieldMapping[field] || field} = ?`).join(', ');
+    if (count > 0) {
+      console.log('✅ Global funnel stages already initialized');
+      return;
+    }
+
+    console.log('🔧 Initializing global funnel stages...');
+
+    // Default global funnel stages for real estate
+    const defaultStages = [
+      { name: 'Novo Lead', description: 'Lead recém captado', color: '#3B82F6', order: 1 },
+      { name: 'Primeiro Contato', description: 'Primeiro contato realizado', color: '#10B981', order: 2 },
+      { name: 'Qualificação', description: 'Lead em processo de qualificação', color: '#F59E0B', order: 3 },
+      { name: 'Visita Agendada', description: 'Visita ao imóvel agendada', color: '#8B5CF6', order: 4 },
+      { name: 'Proposta Enviada', description: 'Proposta comercial enviada', color: '#06B6D4', order: 5 },
+      { name: 'Negociação', description: 'Em negociação de valores/condições', color: '#F97316', order: 6 },
+      { name: 'Fechado - Ganho', description: 'Negócio fechado com sucesso', color: '#22C55E', order: 7 },
+      { name: 'Fechado - Perdido', description: 'Negócio não concluído', color: '#EF4444', order: 8 },
+    ];
+
+    for (const stage of defaultStages) {
+      const id = randomUUID();
       await this.connection.execute(
-        `UPDATE funnel_stages SET ${setClause}, updated_at = NOW() WHERE id = ?`,
-        [...values, id]
+        'INSERT INTO funnel_stages (id, company_id, name, description, color, `order`, is_active, is_global) VALUES (?, NULL, ?, ?, ?, ?, TRUE, TRUE)',
+        [id, stage.name, stage.description, stage.color, stage.order]
       );
     }
-    
-    const updatedStage = await this.getFunnelStage(id);
-    if (!updatedStage) throw new Error('Failed to update funnel stage');
-    return updatedStage;
-  }
 
-  async deleteFunnelStage(id: string): Promise<void> {
-    if (!this.connection) throw new Error('No database connection');
-    
-    await this.connection.execute('DELETE FROM funnel_stages WHERE id = ?', [id]);
-  }
-
-  async reorderFunnelStage(id: string, direction: 'up' | 'down', companyId: string): Promise<{ success: boolean }> {
-    if (!this.connection) throw new Error('No database connection');
-    
-    // Get the current stage
-    const currentStage = await this.getFunnelStage(id);
-    if (!currentStage) {
-      throw new Error('Funnel stage not found');
-    }
-    
-    // Get all stages for this company ordered by order
-    const allStages = await this.getFunnelStagesByCompany(companyId);
-    const currentIndex = allStages.findIndex(stage => stage.id === id);
-    
-    if (currentIndex === -1) {
-      throw new Error('Stage not found in company stages');
-    }
-    
-    let swapIndex: number;
-    if (direction === 'up') {
-      swapIndex = currentIndex - 1;
-      if (swapIndex < 0) {
-        return { success: false }; // Already at the top
-      }
-    } else {
-      swapIndex = currentIndex + 1;
-      if (swapIndex >= allStages.length) {
-        return { success: false }; // Already at the bottom
-      }
-    }
-    
-    // Swap the order values
-    const currentOrder = allStages[currentIndex].order;
-    const swapOrder = allStages[swapIndex].order;
-    
-    await this.connection.beginTransaction();
-    
-    try {
-      // Update both stages' order
-      await this.connection.execute(
-        'UPDATE funnel_stages SET `order` = ? WHERE id = ?',
-        [swapOrder, currentStage.id]
-      );
-      
-      await this.connection.execute(
-        'UPDATE funnel_stages SET `order` = ? WHERE id = ?',
-        [currentOrder, allStages[swapIndex].id]
-      );
-      
-      await this.connection.commit();
-      return { success: true };
-    } catch (error) {
-      await this.connection.rollback();
-      throw error;
-    }
+    console.log('✅ Global funnel stages initialized successfully');
   }
 
   // Customer methods

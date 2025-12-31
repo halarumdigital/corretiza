@@ -24,7 +24,7 @@ import {
   insertEvolutionConfigSchema, insertAiConfigSchema, insertWhatsappInstanceSchema,
   insertAiAgentSchema, insertConversationSchema, insertMessageSchema,
   insertContactListSchema, insertContactListItemSchema, insertScheduledMessageSchema,
-  insertFunnelStageSchema, insertCustomerSchema, insertLeadSchema, insertPropertySchema,
+  insertCustomerSchema, insertLeadSchema, insertPropertySchema,
   insertCompanyCustomDomainSchema, insertPlanSchema
 } from "@shared/schema";
 import { getEmailService } from "./services/emailService";
@@ -51,6 +51,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
   // Initialize storage connection
   const storage = getStorage();
   await storage.init();
+
+  // Initialize global funnel stages if they don't exist
+  await storage.initializeGlobalFunnelStages();
 
   // Configure multer for file uploads
   const storage_config = multer.diskStorage({
@@ -3818,136 +3821,14 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
-  // Funnel Stages endpoints
-  app.get("/api/funnel-stages", authenticate, requireClient, async (req: AuthRequest, res) => {
+  // Funnel Stages endpoints (Global - fixed for all companies)
+  app.get("/api/funnel-stages", authenticate, async (req: AuthRequest, res) => {
     try {
-      if (!req.user?.companyId) {
-        return res.status(404).json({ error: "Empresa não encontrada" });
-      }
-
-      const funnelStages = await storage.getFunnelStagesByCompany(req.user.companyId);
+      const funnelStages = await storage.getGlobalFunnelStages();
       res.json(funnelStages);
     } catch (error) {
       console.error("Get funnel stages error:", error);
       res.status(500).json({ error: "Erro ao buscar etapas do funil" });
-    }
-  });
-
-  app.post("/api/funnel-stages", authenticate, requireClient, async (req: AuthRequest, res) => {
-    try {
-      if (!req.user?.companyId) {
-        return res.status(404).json({ error: "Empresa não encontrada" });
-      }
-
-      // Get the current highest order for this company to set the new stage at the end
-      const existingStages = await storage.getFunnelStagesByCompany(req.user.companyId);
-      const maxOrder = existingStages.length > 0 ? Math.max(...existingStages.map(s => s.order)) : 0;
-
-      const stageData = insertFunnelStageSchema.parse({
-        ...req.body,
-        companyId: req.user.companyId,
-        order: maxOrder + 1
-      });
-
-      const funnelStage = await storage.createFunnelStage(stageData);
-      res.status(201).json(funnelStage);
-    } catch (error) {
-      console.error("Create funnel stage error:", error);
-      res.status(500).json({ error: "Erro ao criar etapa do funil" });
-    }
-  });
-
-  app.put("/api/funnel-stages/:id", authenticate, requireClient, async (req: AuthRequest, res) => {
-    try {
-      const { id } = req.params;
-      const funnelStage = await storage.getFunnelStage(id);
-      
-      if (!funnelStage) {
-        return res.status(404).json({ error: "Etapa do funil não encontrada" });
-      }
-
-      // Check company access
-      if (req.user?.role !== 'admin' && funnelStage.companyId !== req.user?.companyId) {
-        return res.status(403).json({ error: "Acesso negado" });
-      }
-
-      const updatedStage = await storage.updateFunnelStage(id, req.body);
-      res.json(updatedStage);
-    } catch (error) {
-      console.error("Update funnel stage error:", error);
-      res.status(500).json({ error: "Erro ao atualizar etapa do funil" });
-    }
-  });
-
-  app.put("/api/funnel-stages/:id/toggle", authenticate, requireClient, async (req: AuthRequest, res) => {
-    try {
-      const { id } = req.params;
-      const { isActive } = req.body;
-      const funnelStage = await storage.getFunnelStage(id);
-      
-      if (!funnelStage) {
-        return res.status(404).json({ error: "Etapa do funil não encontrada" });
-      }
-
-      // Check company access
-      if (req.user?.role !== 'admin' && funnelStage.companyId !== req.user?.companyId) {
-        return res.status(403).json({ error: "Acesso negado" });
-      }
-
-      const updatedStage = await storage.updateFunnelStage(id, { isActive });
-      res.json(updatedStage);
-    } catch (error) {
-      console.error("Toggle funnel stage status error:", error);
-      res.status(500).json({ error: "Erro ao alterar status da etapa" });
-    }
-  });
-
-  app.post("/api/funnel-stages/:id/reorder", authenticate, requireClient, async (req: AuthRequest, res) => {
-    try {
-      const { id } = req.params;
-      const { direction } = req.body;
-      const funnelStage = await storage.getFunnelStage(id);
-      
-      if (!funnelStage) {
-        return res.status(404).json({ error: "Etapa do funil não encontrada" });
-      }
-
-      // Check company access
-      if (req.user?.role !== 'admin' && funnelStage.companyId !== req.user?.companyId) {
-        return res.status(403).json({ error: "Acesso negado" });
-      }
-
-      if (!funnelStage.companyId) {
-        return res.status(400).json({ error: "Empresa não encontrada para esta etapa" });
-      }
-
-      const result = await storage.reorderFunnelStage(id, direction, funnelStage.companyId);
-      res.json(result);
-    } catch (error) {
-      console.error("Reorder funnel stage error:", error);
-      res.status(500).json({ error: "Erro ao reordenar etapa do funil" });
-    }
-  });
-
-  app.delete("/api/funnel-stages/:id", authenticate, requireClient, async (req: AuthRequest, res) => {
-    try {
-      const { id } = req.params;
-      const funnelStage = await storage.getFunnelStage(id);
-      
-      if (!funnelStage) {
-        return res.status(404).json({ error: "Etapa do funil não encontrada" });
-      }
-
-      // Check company access
-      if (req.user?.role !== 'admin' && funnelStage.companyId !== req.user?.companyId) {
-        return res.status(403).json({ error: "Acesso negado" });
-      }
-
-      await storage.deleteFunnelStage(id);
-      res.status(204).send();
-    } catch (error) {
-      console.error("Delete funnel stage error:", error);
-      res.status(500).json({ error: "Erro ao excluir etapa do funil" });
     }
   });
 

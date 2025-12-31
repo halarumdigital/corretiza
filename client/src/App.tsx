@@ -28,7 +28,6 @@ import Conversations from "@/pages/client/conversations";
 import WhatsAppDisparo from "@/pages/client/whatsapp-disparo";
 import WhatsAppListaTransmissao from "@/pages/client/whatsapp-lista-transmissao";
 import WhatsAppProxy from "@/pages/client/whatsapp-proxy";
-import ComercialFunil from "@/pages/client/comercial-funil";
 import ComercialAtendimentos from "@/pages/client/comercial-atendimentos";
 import ComercialLeads from "@/pages/client/comercial-leads";
 import MeusImoveis from "@/pages/client/meus-imoveis";
@@ -213,14 +212,6 @@ function Router() {
           requiredRole="client"
           title="Proxies WebShare"
           subtitle="Visualizar proxies disponíveis"
-        />
-      </Route>
-      <Route path="/client/comercial/funil">
-        <ProtectedRoute 
-          component={ComercialFunil}
-          requiredRole="client"
-          title="Funil de Vendas"
-          subtitle="Gerencie as etapas do seu funil"
         />
       </Route>
       <Route path="/client/comercial/atendimentos">

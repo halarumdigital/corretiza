@@ -1387,9 +1387,9 @@ Responda sempre em português brasileiro de forma natural e helpful.\n\n`;
           console.log(`📝 [LEAD+CUSTOMER] Customer conversationId atualizado`);
         }
       } else {
-        // Buscar primeiro estágio do funil para a empresa
-        const funnelStages = await storage.getFunnelStagesByCompany(instance.companyId);
-        const firstStage = funnelStages.find(stage => stage.order === 0) || funnelStages[0];
+        // Buscar primeiro estágio do funil global
+        const funnelStages = await storage.getGlobalFunnelStages();
+        const firstStage = funnelStages.find(stage => stage.order === 1) || funnelStages[0];
 
         if (firstStage) {
           // Criar customer na tabela customers
@@ -1410,7 +1410,7 @@ Responda sempre em português brasileiro de forma natural e helpful.\n\n`;
           });
           console.log(`🎉 [LEAD+CUSTOMER] CUSTOMER CRIADO! ID: ${newCustomer.id}, Nome: ${newCustomer.name}`);
         } else {
-          console.log(`⚠️ [LEAD+CUSTOMER] Nenhum estágio do funil encontrado para a empresa`);
+          console.log(`⚠️ [LEAD+CUSTOMER] Nenhum estágio do funil encontrado (global)`);
         }
       }
 

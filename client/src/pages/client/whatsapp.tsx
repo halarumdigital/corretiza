@@ -11,26 +11,18 @@ import { useToast } from "@/hooks/use-toast";
 import { queryClient } from "@/lib/queryClient";
 import { apiGet, apiPost, apiDelete } from "@/lib/api";
 import { WhatsappInstance, AiAgent } from "@/types";
-import { MessageSquare, Plus, Settings, Unlink, QrCode, RefreshCw, Trash2, CheckCircle, XCircle, Clock, Bot, Shield } from "lucide-react";
+import { MessageSquare, Plus, Settings, Unlink, QrCode, RefreshCw, Trash2, CheckCircle, XCircle, Clock, Bot } from "lucide-react";
 
 export default function WhatsApp() {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [isProxyModalOpen, setIsProxyModalOpen] = useState(false);
   const [qrCode, setQrCode] = useState<string | null>(null);
   const [selectedInstance, setSelectedInstance] = useState<string | null>(null);
   const [qrLoading, setQrLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: "",
     phone: "",
-  });
-  const [proxyData, setProxyData] = useState({
-    host: "",
-    port: "80",
-    protocol: "http",
-    username: "",
-    password: "",
   });
 
   const { data: instances = [], isLoading } = useQuery<WhatsappInstance[]>({
@@ -214,53 +206,6 @@ export default function WhatsApp() {
     }
   };
 
-  const handleProxyConfig = (instanceId: string) => {
-    setSelectedInstance(instanceId);
-    setIsProxyModalOpen(true);
-    // Reset proxy form data
-    setProxyData({
-      host: "",
-      port: "80",
-      protocol: "http",
-      username: "",
-      password: "",
-    });
-  };
-
-  const handleProxySubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedInstance) return;
-
-    try {
-      toast({
-        title: "Configurando...",
-        description: "Configurando proxy da instância...",
-      });
-
-      await apiPost(`/whatsapp-instances/${selectedInstance}/proxy`, {
-        host: proxyData.host,
-        port: parseInt(proxyData.port),
-        protocol: proxyData.protocol,
-        username: proxyData.username || undefined,
-        password: proxyData.password || undefined,
-      });
-      
-      toast({
-        title: "Sucesso",
-        description: "Proxy configurado com sucesso",
-      });
-      
-      setIsProxyModalOpen(false);
-    } catch (error) {
-      console.error("Error configuring proxy:", error);
-      toast({
-        title: "Erro",
-        description: "Erro ao configurar proxy",
-        variant: "destructive",
-      });
-    }
-  };
-
   const handleLinkAgent = (instanceId: string, agentId: string) => {
     const finalAgentId = agentId === "none" ? "" : agentId;
     linkAgentMutation.mutate({ instanceId, agentId: finalAgentId });
@@ -393,14 +338,6 @@ export default function WhatsApp() {
             >
               <Bot className="w-4 h-4 mr-1" />
               Configurar IA
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => handleProxyConfig(instance.id)}
-            >
-              <Shield className="w-4 h-4 mr-1" />
-              Configurar Proxy
             </Button>
             <Button
               variant="outline"
@@ -567,85 +504,6 @@ export default function WhatsApp() {
               </div>
             )}
           </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Proxy Configuration Modal */}
-      <Dialog open={isProxyModalOpen} onOpenChange={setIsProxyModalOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Shield className="w-5 h-5" />
-              Configurar Proxy
-            </DialogTitle>
-          </DialogHeader>
-          <form onSubmit={handleProxySubmit} className="space-y-4">
-            <div>
-              <Label htmlFor="proxy-host">Host do Proxy</Label>
-              <Input
-                id="proxy-host"
-                value={proxyData.host}
-                onChange={(e) => setProxyData(prev => ({ ...prev, host: e.target.value }))}
-                placeholder="proxy.exemplo.com"
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="proxy-port">Porta</Label>
-              <Input
-                id="proxy-port"
-                type="number"
-                value={proxyData.port}
-                onChange={(e) => setProxyData(prev => ({ ...prev, port: e.target.value }))}
-                placeholder="80"
-                required
-              />
-            </div>
-            <div>
-              <Label htmlFor="proxy-protocol">Protocolo</Label>
-              <Select
-                value={proxyData.protocol}
-                onValueChange={(value) => setProxyData(prev => ({ ...prev, protocol: value }))}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o protocolo" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="http">HTTP</SelectItem>
-                  <SelectItem value="https">HTTPS</SelectItem>
-                  <SelectItem value="socks4">SOCKS4</SelectItem>
-                  <SelectItem value="socks5">SOCKS5</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <Label htmlFor="proxy-username">Usuário (opcional)</Label>
-              <Input
-                id="proxy-username"
-                value={proxyData.username}
-                onChange={(e) => setProxyData(prev => ({ ...prev, username: e.target.value }))}
-                placeholder="Digite o usuário"
-              />
-            </div>
-            <div>
-              <Label htmlFor="proxy-password">Senha (opcional)</Label>
-              <Input
-                id="proxy-password"
-                type="password"
-                value={proxyData.password}
-                onChange={(e) => setProxyData(prev => ({ ...prev, password: e.target.value }))}
-                placeholder="Digite a senha"
-              />
-            </div>
-            <div className="flex justify-end space-x-2">
-              <Button type="button" variant="outline" onClick={() => setIsProxyModalOpen(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit">
-                Configurar Proxy
-              </Button>
-            </div>
-          </form>
         </DialogContent>
       </Dialog>
     </div>

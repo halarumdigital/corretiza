@@ -182,12 +182,13 @@ export const scheduledMessages = mysqlTable("scheduled_messages", {
 
 export const funnelStages = mysqlTable("funnel_stages", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-  companyId: varchar("company_id", { length: 36 }).notNull(),
+  companyId: varchar("company_id", { length: 36 }), // Nullable for global stages
   name: varchar("name", { length: 255 }).notNull(),
   description: text("description"),
   color: varchar("color", { length: 7 }).notNull().default("#3B82F6"),
   order: int("order").notNull().default(0),
   isActive: boolean("is_active").default(true),
+  isGlobal: boolean("is_global").default(false), // Flag para etapas globais
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
@@ -476,6 +477,7 @@ export const insertFunnelStageSchema = createInsertSchema(funnelStages).pick({
   color: true,
   order: true,
   isActive: true,
+  isGlobal: true,
 });
 
 export const insertCustomerSchema = createInsertSchema(customers).pick({

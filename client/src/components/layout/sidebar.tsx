@@ -45,7 +45,6 @@ const clientNavItems: NavItem[] = [
     label: "Comercial",
     icon: <Building className="w-5 h-5" />,
     children: [
-      { href: "/client/comercial/funil", label: "Funil", icon: <LayoutDashboard className="w-4 h-4" /> },
       { href: "/client/comercial/atendimentos", label: "Atendimentos", icon: <Users className="w-4 h-4" /> },
       { href: "/client/comercial/leads", label: "Leads", icon: <UserPlus className="w-4 h-4" /> },
     ]
