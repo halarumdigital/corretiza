@@ -2016,6 +2016,10 @@ export class MySQLStorage implements IStorage {
       fields.push('interested_property_type = ?');
       values.push(updates.interestedPropertyType);
     }
+    if ((updates as any).interestedTransactionType !== undefined) {
+      fields.push('interested_transaction_type = ?');
+      values.push((updates as any).interestedTransactionType);
+    }
 
     if (fields.length === 0) {
       throw new Error('No fields to update');
@@ -2056,6 +2060,7 @@ export class MySQLStorage implements IStorage {
       conversationId: row.conversation_id,
       interestedCityId: row.interested_city_id,
       interestedPropertyType: row.interested_property_type,
+      interestedTransactionType: row.interested_transaction_type,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };

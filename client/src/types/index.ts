@@ -149,6 +149,7 @@ export interface RankingItem {
 export interface DashboardCharts {
   propertyTypes: RankingItem[];
   transactionTypes: RankingItem[];
+  appointmentsChart: Array<{ day: string; agendadas: number }>;
 }
 
 export interface FunnelStage {

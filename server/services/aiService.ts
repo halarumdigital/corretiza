@@ -1954,7 +1954,7 @@ ${whatsappLink}`;
         ['ap', 'apartamento'],
       ];
 
-      let updates: { interestedCityId?: string; interestedPropertyType?: string } = {};
+      let updates: { interestedCityId?: string; interestedPropertyType?: string; interestedTransactionType?: string } = {};
       let shouldUpdate = false;
 
       // Detectar tipo de imóvel (se ainda não tiver)
@@ -1965,6 +1965,23 @@ ${whatsappLink}`;
             updates.interestedPropertyType = tipo;
             shouldUpdate = true;
             console.log(`🏠 [CUSTOMER_UPDATE] Tipo de imóvel detectado: ${tipo}`);
+            break;
+          }
+        }
+      }
+
+      // Detectar tipo de transação (venda/locação)
+      if (!(customer as any).interestedTransactionType) {
+        const transactionPatterns: Array<[RegExp, string]> = [
+          [/\b(comprar|compra|venda|aquisição|adquirir)\b/i, 'Venda'],
+          [/\b(alugar|aluguel|locação|locacao|locar)\b/i, 'Locação'],
+        ];
+
+        for (const [regex, tipo] of transactionPatterns) {
+          if (regex.test(fullConversation)) {
+            updates.interestedTransactionType = tipo;
+            shouldUpdate = true;
+            console.log(`💼 [CUSTOMER_UPDATE] Tipo de transação detectado: ${tipo}`);
             break;
           }
         }
@@ -2000,6 +2017,27 @@ ${whatsappLink}`;
         console.log(`📝 [CUSTOMER_UPDATE] Atualizando customer com:`, updates);
         await storage.updateCustomer(customer.id, updates);
         console.log(`✅ [CUSTOMER_UPDATE] Customer atualizado com sucesso!`);
+
+        // TAMBÉM atualizar o lead correspondente (para o dashboard)
+        try {
+          const lead = await storage.getLeadByPhone(phone, companyId);
+          if (lead) {
+            const leadUpdates: any = {};
+            if (updates.interestedPropertyType) {
+              leadUpdates.interestedPropertyType = updates.interestedPropertyType;
+            }
+            if (updates.interestedTransactionType) {
+              leadUpdates.interestedTransactionType = updates.interestedTransactionType;
+            }
+
+            if (Object.keys(leadUpdates).length > 0) {
+              await storage.updateLead(lead.id, leadUpdates);
+              console.log(`✅ [LEAD_UPDATE] Lead ${lead.id} atualizado com:`, leadUpdates);
+            }
+          }
+        } catch (leadError) {
+          console.error(`⚠️ [LEAD_UPDATE] Erro ao atualizar lead:`, leadError);
+        }
       } else {
         console.log(`ℹ️ [CUSTOMER_UPDATE] Nenhuma atualização necessária`);
       }

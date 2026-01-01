@@ -3634,6 +3634,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const instances = await storage.getWhatsappInstancesByCompany(companyId);
       const agents = await storage.getAiAgentsByCompany(companyId);
       const leads = await storage.getLeadsByCompany(companyId);
+      const appointments = await storage.getAppointmentsByCompany(companyId);
 
       // Parse date range from query parameters
       const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
@@ -3644,10 +3645,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let periodEnd: Date;
 
       if (startDate && endDate) {
-        periodStart = new Date(startDate);
-        periodStart.setHours(0, 0, 0, 0);
-        periodEnd = new Date(endDate);
-        periodEnd.setHours(23, 59, 59, 999);
+        // Criar datas no timezone local (não UTC) para evitar problemas de timezone
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        periodStart = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+        periodEnd = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
       } else {
         // Default to today
         periodStart = new Date(now);
@@ -3662,15 +3664,36 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const prevPeriodStart = new Date(prevPeriodEnd.getTime() - periodDuration);
       prevPeriodStart.setHours(0, 0, 0, 0);
 
-      // Leads do período selecionado e período anterior
+      // Debug: Ver todos os leads
+      console.log(`📊 [STATS DEBUG] Total leads da empresa: ${leads.length}`);
+      console.log(`📊 [STATS DEBUG] Período: ${periodStart.toISOString()} até ${periodEnd.toISOString()}`);
+
+      // Leads do WhatsApp (sem filtro de data primeiro para debug)
+      const leadsWhatsApp = leads.filter(l => l.source === 'WhatsApp');
+      console.log(`📊 [STATS DEBUG] Leads com source='WhatsApp': ${leadsWhatsApp.length}`);
+
+      if (leadsWhatsApp.length > 0) {
+        console.log(`📊 [STATS DEBUG] Exemplo de lead:`, {
+          id: leadsWhatsApp[0].id,
+          source: leadsWhatsApp[0].source,
+          createdAt: leadsWhatsApp[0].createdAt,
+          createdAtType: typeof leadsWhatsApp[0].createdAt
+        });
+      }
+
+      // Leads do WhatsApp do período selecionado e período anterior
       const leadsPeriod = leads.filter(l => {
         if (!l.createdAt) return false;
+        if (l.source !== 'WhatsApp') return false; // Apenas leads do WhatsApp
         const createdAt = new Date(l.createdAt);
         return createdAt >= periodStart && createdAt <= periodEnd;
       }).length;
 
+      console.log(`📊 [STATS DEBUG] Leads WhatsApp no período: ${leadsPeriod}`);
+
       const leadsPrevPeriod = leads.filter(l => {
         if (!l.createdAt) return false;
+        if (l.source !== 'WhatsApp') return false; // Apenas leads do WhatsApp
         const createdAt = new Date(l.createdAt);
         return createdAt >= prevPeriodStart && createdAt <= prevPeriodEnd;
       }).length;
@@ -3682,6 +3705,16 @@ export async function registerRoutes(app: Express): Promise<Server> {
         allConversations = [...allConversations, ...convs];
       }
 
+      console.log(`📊 [STATS DEBUG] Total conversas: ${allConversations.length}`);
+
+      if (allConversations.length > 0) {
+        console.log(`📊 [STATS DEBUG] Exemplo de conversa:`, {
+          id: allConversations[0].id,
+          createdAt: allConversations[0].createdAt,
+          createdAtType: typeof allConversations[0].createdAt
+        });
+      }
+
       // Conversas do período selecionado e período anterior
       const conversationsPeriod = allConversations.filter(c => {
         if (!c.createdAt) return false;
@@ -3689,9 +3722,24 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return createdAt >= periodStart && createdAt <= periodEnd;
       }).length;
 
+      console.log(`📊 [STATS DEBUG] Conversas no período: ${conversationsPeriod}`);
+
       const conversationsPrevPeriod = allConversations.filter(c => {
         if (!c.createdAt) return false;
         const createdAt = new Date(c.createdAt);
+        return createdAt >= prevPeriodStart && createdAt <= prevPeriodEnd;
+      }).length;
+
+      // Agendamentos do período selecionado e período anterior
+      const appointmentsPeriod = appointments.filter(a => {
+        if (!a.createdAt) return false;
+        const createdAt = new Date(a.createdAt);
+        return createdAt >= periodStart && createdAt <= periodEnd;
+      }).length;
+
+      const appointmentsPrevPeriod = appointments.filter(a => {
+        if (!a.createdAt) return false;
+        const createdAt = new Date(a.createdAt);
         return createdAt >= prevPeriodStart && createdAt <= prevPeriodEnd;
       }).length;
 
@@ -3705,7 +3753,7 @@ export async function registerRoutes(app: Express): Promise<Server> {
         activeInstances: instances.filter(i => i.status === 'connected').length,
         aiAgents: agents.length,
         leadsToday: { value: leadsPeriod, change: calcChange(leadsPeriod, leadsPrevPeriod) },
-        scheduledMeetings: { value: 0, change: 0 }, // Funcionalidade futura
+        scheduledMeetings: { value: appointmentsPeriod, change: calcChange(appointmentsPeriod, appointmentsPrevPeriod) },
         conversationsToday: { value: conversationsPeriod, change: calcChange(conversationsPeriod, conversationsPrevPeriod) }
       });
     } catch (error) {
@@ -3722,6 +3770,8 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }
 
       const allLeads = await storage.getLeadsByCompany(req.user.companyId);
+      const allCustomers = await storage.getCustomersByCompany(req.user.companyId);
+      const allAppointments = await storage.getAppointmentsByCompany(req.user.companyId);
 
       // Parse date range from query parameters
       const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
@@ -3732,10 +3782,11 @@ export async function registerRoutes(app: Express): Promise<Server> {
       let periodEnd: Date;
 
       if (startDate && endDate) {
-        periodStart = new Date(startDate);
-        periodStart.setHours(0, 0, 0, 0);
-        periodEnd = new Date(endDate);
-        periodEnd.setHours(23, 59, 59, 999);
+        // Criar datas no timezone local (não UTC) para evitar problemas de timezone
+        const [startYear, startMonth, startDay] = startDate.split('-').map(Number);
+        const [endYear, endMonth, endDay] = endDate.split('-').map(Number);
+        periodStart = new Date(startYear, startMonth - 1, startDay, 0, 0, 0, 0);
+        periodEnd = new Date(endYear, endMonth - 1, endDay, 23, 59, 59, 999);
       } else {
         // Default to today
         periodStart = new Date(now);
@@ -3751,12 +3802,33 @@ export async function registerRoutes(app: Express): Promise<Server> {
         return createdAt >= periodStart && createdAt <= periodEnd;
       });
 
-      // Agregar por tipo de imóvel
+      // Filter customers by date range
+      const customers = allCustomers.filter(customer => {
+        if (!customer.createdAt) return false;
+        const createdAt = new Date(customer.createdAt);
+        return createdAt >= periodStart && createdAt <= periodEnd;
+      });
+
+      // Agregar por tipo de imóvel (combinando leads e customers)
       const propertyTypeCounts: Record<string, number> = {};
+
+      // Contar dos leads
       leads.forEach(lead => {
         if (lead.interestedPropertyType) {
           const type = lead.interestedPropertyType;
           propertyTypeCounts[type] = (propertyTypeCounts[type] || 0) + 1;
+        }
+      });
+
+      // Contar dos customers (se não tiver no lead correspondente)
+      customers.forEach(customer => {
+        if (customer.interestedPropertyType) {
+          // Verificar se já não foi contado pelo lead
+          const correspondingLead = leads.find(l => l.phone === customer.phone);
+          if (!correspondingLead?.interestedPropertyType) {
+            const type = customer.interestedPropertyType;
+            propertyTypeCounts[type] = (propertyTypeCounts[type] || 0) + 1;
+          }
         }
       });
 
@@ -3767,12 +3839,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .slice(0, 4)
         .map((item, index) => ({ rank: index + 1, name: item.name, value: item.value }));
 
-      // Agregar por tipo de transação
+      // Agregar por tipo de transação (combinando leads e customers)
       const transactionTypeCounts: Record<string, number> = {};
+
+      // Contar dos leads
       leads.forEach(lead => {
         if ((lead as any).interestedTransactionType) {
           const type = (lead as any).interestedTransactionType;
           transactionTypeCounts[type] = (transactionTypeCounts[type] || 0) + 1;
+        }
+      });
+
+      // Contar dos customers (se não tiver no lead correspondente)
+      customers.forEach(customer => {
+        if ((customer as any).interestedTransactionType) {
+          const correspondingLead = leads.find(l => l.phone === customer.phone);
+          if (!(correspondingLead as any)?.interestedTransactionType) {
+            const type = (customer as any).interestedTransactionType;
+            transactionTypeCounts[type] = (transactionTypeCounts[type] || 0) + 1;
+          }
         }
       });
 
@@ -3782,9 +3867,42 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .sort((a, b) => b.value - a.value)
         .map((item, index) => ({ rank: index + 1, name: item.name, value: item.value }));
 
+      // Agregar agendamentos por dia no período
+      const appointmentsInPeriod = allAppointments.filter(apt => {
+        if (!apt.createdAt) return false;
+        const createdAt = new Date(apt.createdAt);
+        return createdAt >= periodStart && createdAt <= periodEnd;
+      });
+
+      // Criar mapa de agendamentos por dia
+      const appointmentsByDay: Record<string, number> = {};
+
+      // Gerar todos os dias do período
+      const currentDate = new Date(periodStart);
+      while (currentDate <= periodEnd) {
+        const dayKey = currentDate.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        appointmentsByDay[dayKey] = 0;
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      // Contar agendamentos por dia
+      appointmentsInPeriod.forEach(apt => {
+        if (apt.createdAt) {
+          const dayKey = new Date(apt.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+          if (appointmentsByDay[dayKey] !== undefined) {
+            appointmentsByDay[dayKey]++;
+          }
+        }
+      });
+
+      // Converter para array ordenado por data
+      const appointmentsChart = Object.entries(appointmentsByDay)
+        .map(([day, agendadas]) => ({ day, agendadas }));
+
       res.json({
         propertyTypes,
-        transactionTypes
+        transactionTypes,
+        appointmentsChart
       });
     } catch (error) {
       console.error("Get dashboard charts error:", error);

@@ -403,7 +403,7 @@ export default function ClientDashboard() {
       </div>
 
       {/* Appointments Chart */}
-      <AppointmentsChart data={[]} />
+      <AppointmentsChart data={charts?.appointmentsChart || []} />
 
       {/* Property Types and Transaction Demand Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
