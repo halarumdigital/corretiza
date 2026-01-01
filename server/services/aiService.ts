@@ -497,72 +497,96 @@ export class AIService {
 
       const messageLower = context.message.toLowerCase();
 
+      // 🚫 VERIFICAR SE É INTENÇÃO DE AGENDAMENTO - SE FOR, NÃO FORÇAR BUSCA DE IMÓVEIS
+      const agendamentoKeywords = ['agendar', 'agendamento', 'visita', 'visitar', 'agende', 'marcar', 'marque', 'quero conhecer', 'gostei', 'esse', 'desse', 'este', 'deste'];
+      const codigoImovelPattern = /^[A-Z]{1,3}\d{2,4}$/i; // Padrão como IMV103, A1001, etc
+      const ehIntencaoAgendamento = agendamentoKeywords.some(kw => messageLower.includes(kw)) || codigoImovelPattern.test(messageLower.trim());
+
+      console.log(`📅 [AGENDAMENTO] Verificando se é intenção de agendamento...`);
+      console.log(`📅 [AGENDAMENTO] ehIntencaoAgendamento: ${ehIntencaoAgendamento}`);
+
       console.log(`🔍 [PROPERTY_SEARCH] ========== DETECTANDO BUSCA DE IMÓVEIS ==========`);
       console.log(`🔍 [PROPERTY_SEARCH] Mensagem atual: "${context.message}"`);
       console.log(`🔍 [PROPERTY_SEARCH] Histórico existe: ${!!context.conversationHistory}`);
       console.log(`🔍 [PROPERTY_SEARCH] Histórico length: ${context.conversationHistory?.length || 0}`);
       console.log(`🔍 [PROPERTY_SEARCH] instance?.companyId: ${instance?.companyId}`);
 
-      // SEMPRE montar o texto completo: histórico + mensagem atual
-      // Isso garante que mesmo com histórico vazio, analisamos a conversa completa
-      const historicoTextoCompleto = [
-        ...(context.conversationHistory || []).map(m => m.content.toLowerCase()),
+      // SEMPRE montar o texto completo: APENAS mensagens do USUÁRIO + mensagem atual
+      // Isso evita detectar palavras que o próprio agente escreveu nas perguntas
+      const historicoTextoUsuario = [
+        ...(context.conversationHistory || [])
+          .filter(m => m.role === 'user')
+          .map(m => m.content.toLowerCase()),
         messageLower
       ].join(' ');
 
-      console.log(`🔍 [PROPERTY_SEARCH] historicoTextoCompleto (hist+atual): "${historicoTextoCompleto.substring(0, 300)}..."`);
+      console.log(`🔍 [PROPERTY_SEARCH] historicoTextoUsuario (user msgs + atual): "${historicoTextoUsuario.substring(0, 300)}..."`);
 
-      // Verificar se mensagem atual tem keyword de busca
-      let isPropertySearch = instance?.companyId && propertyService.isPropertySearchIntent(context.message);
-      console.log(`🔍 [PROPERTY_SEARCH] isPropertySearchIntent(mensagem atual): ${propertyService.isPropertySearchIntent(context.message)}`);
-      console.log(`🔍 [PROPERTY_SEARCH] isPropertySearch inicial: ${isPropertySearch}`);
+      // 🚫 SE FOR INTENÇÃO DE AGENDAMENTO, NÃO FORÇAR BUSCA DE IMÓVEIS
+      let isPropertySearch = false;
 
-      // NOVA LÓGICA: Verificar se no texto COMPLETO (histórico + atual) há cidade E tipo
-      // Isso funciona MESMO quando o histórico está vazio
-      if (!isPropertySearch && instance?.companyId) {
-        // Verificar se o texto completo menciona tipo de imóvel
-        const textoTemTipo = tiposImovelKeywords.some(tipo => historicoTextoCompleto.includes(tipo));
-        // Verificar se o texto completo menciona cidade
-        const textoTemCidade = cidadesConhecidas.some(cidade => historicoTextoCompleto.includes(cidade));
+      if (ehIntencaoAgendamento) {
+        console.log(`📅 [AGENDAMENTO] ⛔ Mensagem é sobre AGENDAMENTO - NÃO forçar busca de imóveis`);
+        isPropertySearch = false;
+      } else {
+        // Verificar se mensagem atual tem keyword de busca
+        isPropertySearch = !!(instance?.companyId && propertyService.isPropertySearchIntent(context.message));
+        console.log(`🔍 [PROPERTY_SEARCH] isPropertySearchIntent(mensagem atual): ${propertyService.isPropertySearchIntent(context.message)}`);
+        console.log(`🔍 [PROPERTY_SEARCH] isPropertySearch inicial: ${isPropertySearch}`);
 
-        console.log(`🔍 [PROPERTY_SEARCH] textoTemTipo (no texto completo): ${textoTemTipo}`);
-        console.log(`🔍 [PROPERTY_SEARCH] textoTemCidade (no texto completo): ${textoTemCidade}`);
+        // NOVA LÓGICA: Verificar se nas mensagens DO USUÁRIO há cidade E tipo
+        // Isso funciona MESMO quando o histórico está vazio
+        if (!isPropertySearch && instance?.companyId) {
+          // Verificar se as mensagens do usuário mencionam tipo de imóvel
+          const textoTemTipo = tiposImovelKeywords.some(tipo => historicoTextoUsuario.includes(tipo));
+          // Verificar se as mensagens do usuário mencionam cidade
+          const textoTemCidade = cidadesConhecidas.some(cidade => historicoTextoUsuario.includes(cidade));
 
-        // Se o texto completo tem AMBOS tipo e cidade = é busca!
-        if (textoTemTipo && textoTemCidade) {
-          isPropertySearch = true;
-          console.log(`🏠 [AI] ✅ DETECTADA BUSCA COMPLETA: Tipo + Cidade no texto completo - FORÇANDO FUNCTION CALLING`);
+          console.log(`🔍 [PROPERTY_SEARCH] textoTemTipo (user msgs): ${textoTemTipo}`);
+          console.log(`🔍 [PROPERTY_SEARCH] textoTemCidade (user msgs): ${textoTemCidade}`);
+
+          // Se o USUÁRIO mencionou AMBOS tipo e cidade = é busca!
+          if (textoTemTipo && textoTemCidade) {
+            isPropertySearch = true;
+            console.log(`🏠 [AI] ✅ DETECTADA BUSCA COMPLETA: Tipo + Cidade nas mensagens do usuário - FORÇANDO FUNCTION CALLING`);
+          }
         }
       }
 
       // LÓGICA ADICIONAL: Se não detectou ainda, verificar mensagem atual vs histórico separadamente
-      if (!isPropertySearch && instance?.companyId && context.conversationHistory && context.conversationHistory.length > 0) {
-        const historicoText = context.conversationHistory.map(m => m.content.toLowerCase()).join(' ');
+      // IMPORTANTE: Só considerar mensagens do USUÁRIO, não do agente!
+      // 🚫 NÃO executar se for intenção de agendamento
+      if (!ehIntencaoAgendamento && !isPropertySearch && instance?.companyId && context.conversationHistory && context.conversationHistory.length > 0) {
+        // Filtrar apenas mensagens do usuário (role === 'user')
+        const historicoUsuario = context.conversationHistory
+          .filter(m => m.role === 'user')
+          .map(m => m.content.toLowerCase())
+          .join(' ');
 
         // Verificar se a mensagem atual é uma cidade
         const mensagemEhCidade = cidadesConhecidas.some(cidade => messageLower.includes(cidade));
-        // Verificar se o histórico menciona tipo de imóvel
-        const historicoMencionaTipo = tiposImovelKeywords.some(tipo => historicoText.includes(tipo));
+        // Verificar se o histórico DO USUÁRIO menciona tipo de imóvel
+        const historicoMencionaTipo = tiposImovelKeywords.some(tipo => historicoUsuario.includes(tipo));
 
-        console.log(`🔍 [PROPERTY_SEARCH] historicoText (só histórico): "${historicoText.substring(0, 200)}..."`);
+        console.log(`🔍 [PROPERTY_SEARCH] historicoUsuario (só mensagens do user): "${historicoUsuario.substring(0, 200)}..."`);
         console.log(`🔍 [PROPERTY_SEARCH] mensagemEhCidade: ${mensagemEhCidade}`);
-        console.log(`🔍 [PROPERTY_SEARCH] historicoMencionaTipo: ${historicoMencionaTipo}`);
+        console.log(`🔍 [PROPERTY_SEARCH] historicoMencionaTipo (user only): ${historicoMencionaTipo}`);
 
-        // Se a mensagem atual é uma cidade E o histórico menciona tipo de imóvel = é busca!
+        // Se a mensagem atual é uma cidade E o histórico DO USUÁRIO menciona tipo de imóvel = é busca!
         if (mensagemEhCidade && historicoMencionaTipo) {
           isPropertySearch = true;
-          console.log(`🏠 [AI] ✅ Detectada busca: CIDADE atual + TIPO no histórico - FORÇANDO FUNCTION CALLING`);
+          console.log(`🏠 [AI] ✅ Detectada busca: CIDADE atual + TIPO no histórico do usuário - FORÇANDO FUNCTION CALLING`);
         }
 
-        // Verificar também o contrário: mensagem atual tem tipo E histórico tem cidade
+        // Verificar também o contrário: mensagem atual tem tipo E histórico DO USUÁRIO tem cidade
         const mensagemTemTipo = tiposImovelKeywords.some(tipo => messageLower.includes(tipo));
-        const historicoMencionaCidade = cidadesConhecidas.some(cidade => historicoText.includes(cidade));
+        const historicoMencionaCidade = cidadesConhecidas.some(cidade => historicoUsuario.includes(cidade));
         console.log(`🔍 [PROPERTY_SEARCH] mensagemTemTipo: ${mensagemTemTipo}`);
-        console.log(`🔍 [PROPERTY_SEARCH] historicoMencionaCidade: ${historicoMencionaCidade}`);
+        console.log(`🔍 [PROPERTY_SEARCH] historicoMencionaCidade (user only): ${historicoMencionaCidade}`);
 
         if (mensagemTemTipo && historicoMencionaCidade) {
           isPropertySearch = true;
-          console.log(`🏠 [AI] ✅ Detectada busca: TIPO atual + CIDADE no histórico - FORÇANDO FUNCTION CALLING`);
+          console.log(`🏠 [AI] ✅ Detectada busca: TIPO atual + CIDADE no histórico do usuário - FORÇANDO FUNCTION CALLING`);
         }
       } else if (!isPropertySearch) {
         console.log(`🔍 [PROPERTY_SEARCH] ⚠️ Verificação de histórico separado não executada. Condições: isPropertySearch=${isPropertySearch}, companyId=${!!instance?.companyId}, historyLength=${context.conversationHistory?.length || 0}`);
@@ -570,7 +594,8 @@ export class AIService {
 
       // 🔄 NOVA LÓGICA: Detectar pedido de "ver mais" imóveis
       // Se o usuário pedir "mais", "quero ver mais", "próximos", etc - forçar busca_imoveis
-      if (!isPropertySearch && instance?.companyId) {
+      // 🚫 NÃO executar se for intenção de agendamento
+      if (!ehIntencaoAgendamento && !isPropertySearch && instance?.companyId) {
         const pedidoMaisKeywords = ['mais', 'quero ver mais', 'mostre mais', 'tem mais', 'próximos', 'proximos', 'outros', 'outras opções', 'outras opcoes'];
         const ehPedidoMais = pedidoMaisKeywords.some(kw => messageLower.includes(kw));
 
@@ -621,11 +646,12 @@ IMPORTANTE: Você NÃO tem acesso aos imóveis sem usar a função busca_imoveis
 Se o usuário perguntar sobre imóveis e você NÃO chamar a função, você não terá dados para responder.
 
 🔍 ANTES DE CHAMAR busca_imoveis:
-- SEMPRE passe TODOS os parâmetros que você conseguir identificar
-- Se o usuário mencionou "apartamento", "casa", "sala", "terreno", "sobrado" ou "chácara" em QUALQUER mensagem (atual ou histórico), você DEVE passar tipo_imovel
-- Se o usuário mencionou uma cidade, você DEVE passar cidade
-- Se o usuário mencionou "alugar", "locação", "venda", "comprar", você DEVE passar tipo_transacao
-- NUNCA chame busca_imoveis sem passar tipo_imovel se o usuário mencionou o tipo do imóvel
+- Você PRECISA ter pelo menos: tipo_imovel E cidade
+- Se o usuário NÃO informou a CIDADE, PERGUNTE a cidade ANTES de buscar
+- Se o usuário NÃO informou o TIPO DE IMÓVEL, PERGUNTE o tipo ANTES de buscar
+- NUNCA busque imóveis sem saber a CIDADE - sempre pergunte primeiro!
+- Se o usuário mencionou "apartamento", "casa", "sala", "terreno", "sobrado" ou "chácara", você tem o tipo_imovel
+- Se o usuário mencionou "alugar", "locação", "venda", "comprar", você tem o tipo_transacao
 - Analise TODO o histórico da conversa para identificar esses parâmetros
 
 QUANDO você chamar a função busca_imoveis:
@@ -653,47 +679,48 @@ Quando o usuário digitar "mais", "quero ver mais", "mostre mais", "próximos", 
 - Responda: "Mais opções para você! Veja:" (mensagem curta)
 - O sistema continuará mostrando de 3 em 3 até acabar
 
-🚨 FORÇAR FUNCTION CALL:
-Se o usuário mencionou QUALQUER tipo de imóvel E/OU cidade, você DEVE chamar a função busca_imoveis imediatamente!
-NÃO faça perguntas adicionais, NÃO peça esclarecimentos, NÃO diga que vai procurar.
-SIMPLESMENTE CHAME A FUNÇÃO com os parâmetros que você conseguiu identificar!
+🚨 REGRAS PARA CHAMAR busca_imoveis:
+- Você SÓ pode chamar busca_imoveis quando tiver TANTO o tipo de imóvel QUANTO a cidade
+- Se falta a CIDADE: pergunte "Em qual cidade você está procurando?"
+- Se falta o TIPO DE IMÓVEL: pergunte "Que tipo de imóvel você procura? Casa, apartamento, terreno, sala comercial, sobrado ou chácara?"
+- Quando tiver AMBOS (tipo + cidade), aí sim chame a função busca_imoveis
 
 Responda sempre em português brasileiro de forma natural e helpful.
 
 📅 REGRAS DE AGENDAMENTO DE VISITAS:
 
-FLUXO OBRIGATÓRIO (SIGA EXATAMENTE):
-1. Após mostrar os imóveis → PERGUNTE: "Qual imóvel você gostou mais? Vamos agendar uma visita sem compromisso?"
-2. Quando o usuário informar o CÓDIGO do imóvel → PERGUNTE o nome completo
-3. Quando o usuário informar o nome → PERGUNTE o telefone com DDD
-4. Quando o usuário informar o telefone → OFEREÇA 3 OPÇÕES DE HORÁRIO para visita
-5. SOMENTE quando tiver os 4 dados (código + nome + telefone + horário escolhido) → CHAME agendar_visita
+⚠️⚠️⚠️ REGRA CRÍTICA - VOCÊ DEVE COLETAR TODOS OS DADOS ANTES DE AGENDAR ⚠️⚠️⚠️
 
-IMPORTANTE - OFERTA DE HORÁRIOS:
-- SEMPRE ofereça 3 opções de horários disponíveis para a visita
-- Use dias úteis (segunda a sexta) nos PRÓXIMOS 7 DIAS (datas FUTURAS, nunca a data de hoje)
-- Ofereça horários comerciais variados (manhã e tarde): 9h, 10h, 14h, 15h, 16h
-- CRÍTICO: Sempre inclua DIA, MÊS e ANO completos no formato "dia DD/MM/YYYY"
-- Formato OBRIGATÓRIO: "Tenho disponível: Quinta dia 02/01/2026 às 9h, Segunda dia 06/01/2026 às 14h, ou Quarta dia 08/01/2026 às 16h. Qual prefere?"
-- ATENÇÃO À VIRADA DE ANO: Se estamos em dezembro 2025, as datas de janeiro serão de 2026!
+FLUXO OBRIGATÓRIO (SIGA CADA PASSO - NÃO PULE NENHUM):
+1. Quando o usuário quiser agendar → PERGUNTE: "Qual é o código do imóvel que você gostou?"
+2. Quando o usuário informar o CÓDIGO do imóvel → PERGUNTE: "Qual é o seu nome completo?"
+3. Quando o usuário informar o nome → PERGUNTE: "Qual é o seu telefone com DDD para contato?"
+4. Quando o usuário informar o telefone → OFEREÇA 3 OPÇÕES DE HORÁRIO (datas futuras)
+5. SOMENTE quando tiver TODOS os 4 dados → CHAME agendar_visita
+
+🚫 PROIBIÇÕES ABSOLUTAS:
+- NUNCA chame agendar_visita sem ter perguntado e recebido TODOS os 4 dados
+- NUNCA use o nome que aparece no WhatsApp (pushName) - PERGUNTE ao usuário
+- NUNCA use o número do WhatsApp como telefone - PERGUNTE ao usuário
+- NUNCA pule a etapa de oferecer horários - SEMPRE ofereça 3 opções
+- NUNCA invente dados - só use o que o usuário INFORMOU EXPLICITAMENTE
+
+OFERTA DE HORÁRIOS (OBRIGATÓRIO):
+- SEMPRE ofereça EXATAMENTE 3 opções de horários
+- Use dias úteis (segunda a sexta) nos PRÓXIMOS 7 DIAS
 - NUNCA ofereça a data de hoje - sempre datas FUTURAS
-- AGUARDE o usuário escolher o horário antes de chamar agendar_visita
-- Quando o usuário escolher, passe a data COMPLETA COM ANO no parâmetro data_visita (ex: "Sexta dia 02/01/2026 às 16h")
+- Formato: "Tenho disponível: Quinta dia 02/01/2026 às 9h, Segunda dia 06/01/2026 às 14h, ou Quarta dia 08/01/2026 às 16h. Qual prefere?"
+- AGUARDE o usuário escolher antes de chamar agendar_visita
 
-IMPORTANTE - NÃO USE DADOS AUTOMÁTICOS:
-- NÃO use o pushName do WhatsApp como nome - PERGUNTE ao usuário
-- NÃO use o número do WhatsApp como telefone - PERGUNTE ao usuário
-- SEMPRE colete os dados PERGUNTANDO ao usuário
-
-Exemplo de fluxo correto:
-- Usuário: "A1004"
-- Agente: "Ótima escolha! Para agendar uma visita ao imóvel A1004, preciso de alguns dados. Qual é o seu nome completo?"
+EXEMPLO DE FLUXO CORRETO (SIGA ESTE MODELO):
+- Usuário: "quero agendar" ou "IMV107"
+- Agente: "Ótima escolha! Para agendar uma visita, preciso de alguns dados. Qual é o seu nome completo?"
 - Usuário: "João Silva"
-- Agente: "Perfeito, João! Agora me informe seu telefone com DDD para contato."
+- Agente: "Perfeito, João! Qual é o seu telefone com DDD para contato?"
 - Usuário: "47 99999-9999"
 - Agente: "Ótimo! Tenho disponível: Quinta dia 02/01/2026 às 9h, Segunda dia 06/01/2026 às 14h, ou Quarta dia 08/01/2026 às 16h. Qual horário você prefere?"
-- Usuário: "Quarta às 14h"
-- Agente: [AGORA SIM chama agendar_visita com data_visita="Quarta dia 08/01/2026 às 14h"]\n\n`;
+- Usuário: "Segunda às 14h"
+- Agente: [AGORA SIM chama agendar_visita com todos os dados]\n\n`;
       systemPrompt += `IMPORTANTE: SEMPRE siga o prompt e personalidade definidos no início desta mensagem. Não mude seu comportamento ou tom.`;
 
       // PRÉ-PROCESSAR: Detectar cidade e tipo no histórico para evitar loops
@@ -950,6 +977,22 @@ Exemplo de fluxo correto:
         console.log(`🛠️ [FUNCTION_CALL] tipo_transacao do OpenAI:`, functionArgs.tipo_transacao, '(type:', typeof functionArgs.tipo_transacao, ')');
 
         if (functionName === "busca_imoveis") {
+          // 🚫 VERIFICAR SE É INTENÇÃO DE AGENDAMENTO - SE FOR, NÃO EXECUTAR BUSCA
+          const msgLower = context.message.toLowerCase();
+          const agendKeywords = ['agendar', 'agendamento', 'visita', 'visitar', 'agende', 'marcar', 'marque', 'quero conhecer', 'gostei'];
+          const codigoPattern = /^[A-Z]{1,3}\d{2,4}$/i;
+          const ehAgendamento = agendKeywords.some(kw => msgLower.includes(kw)) || codigoPattern.test(msgLower.trim());
+
+          if (ehAgendamento) {
+            console.log(`📅 [BUSCA_IMOVEIS] ⛔ BLOQUEADO! Mensagem é sobre AGENDAMENTO: "${context.message}"`);
+            console.log(`📅 [BUSCA_IMOVEIS] Retornando resposta de texto para continuar fluxo de agendamento`);
+
+            // Retornar uma resposta que continua o fluxo de agendamento
+            return {
+              text: responseMessage.content || "Ótima escolha! Para agendar uma visita, preciso de alguns dados. Qual é o código do imóvel que você gostou?"
+            };
+          }
+
           try {
             // Buscar instância para obter companyId
             let instanceForSearch = await storage.getWhatsappInstanceByEvolutionId(context.instanceId);
@@ -1339,12 +1382,42 @@ Exemplo de fluxo correto:
 
             console.log(`🏢 [AGENDAR_VISITA] CompanyId: ${instanceForAppointment.companyId}`);
 
-            // Extrair dados do agendamento
-            const nomeCliente = functionArgs.nome_cliente || context.pushName || 'Cliente WhatsApp';
-            const telefoneCliente = functionArgs.telefone_cliente || context.phone;
-            const imovelInteresse = functionArgs.imovel_interesse || 'Imóvel não especificado';
-            const dataVisita = functionArgs.data_visita || 'Data a confirmar';
+            // Extrair dados do agendamento - SEM FALLBACKS para forçar coleta
+            const nomeCliente = functionArgs.nome_cliente;
+            const telefoneCliente = functionArgs.telefone_cliente;
+            const imovelInteresse = functionArgs.imovel_interesse;
+            const dataVisita = functionArgs.data_visita;
             const observacoes = functionArgs.observacoes || null;
+
+            // VALIDAÇÃO: Verificar se todos os dados obrigatórios foram coletados
+            const dadosFaltantes: string[] = [];
+            if (!nomeCliente || nomeCliente.trim() === '') {
+              dadosFaltantes.push('nome completo');
+            }
+            if (!telefoneCliente || telefoneCliente.trim() === '') {
+              dadosFaltantes.push('telefone com DDD');
+            }
+            if (!imovelInteresse || imovelInteresse.trim() === '') {
+              dadosFaltantes.push('código do imóvel');
+            }
+            if (!dataVisita || dataVisita.trim() === '') {
+              dadosFaltantes.push('data e hora da visita');
+            }
+
+            if (dadosFaltantes.length > 0) {
+              console.log(`⚠️ [AGENDAR_VISITA] Dados faltantes: ${dadosFaltantes.join(', ')}`);
+              console.log(`⚠️ [AGENDAR_VISITA] Retornando mensagem para coletar dados`);
+
+              // Retornar mensagem solicitando os dados faltantes
+              const plural = dadosFaltantes.length > 1;
+              return {
+                text: `Para agendar sua visita, preciso que você me informe ${plural ? 'os seguintes dados' : 'o seguinte dado'}: ${dadosFaltantes.join(', ')}. ${
+                  dadosFaltantes.includes('nome completo') ? 'Qual é o seu nome completo? ' : ''
+                }${
+                  dadosFaltantes.includes('telefone com DDD') && !dadosFaltantes.includes('nome completo') ? 'Qual é o seu telefone com DDD? ' : ''
+                }`
+              };
+            }
 
             console.log(`📅 [AGENDAR_VISITA] Dados do agendamento:`);
             console.log(`   Nome: ${nomeCliente}`);
@@ -1933,13 +2006,16 @@ ${whatsappLink}`;
       console.log(`✅ [CUSTOMER_UPDATE] Customer encontrado: ${customer.id} - ${customer.name}`);
       console.log(`📊 [CUSTOMER_UPDATE] Estado atual - cityId: ${customer.interestedCityId || 'null'}, propertyType: ${customer.interestedPropertyType || 'null'}`);
 
-      // Combinar histórico + mensagem atual para análise
-      const fullConversation = [
-        ...(conversationHistory || []).map(m => m.content.toLowerCase()),
+      // Combinar APENAS mensagens do USUÁRIO (não do agente) para análise
+      // Isso evita detectar palavras que o próprio agente escreveu nas perguntas
+      const userMessagesOnly = [
+        ...(conversationHistory || [])
+          .filter(m => m.role === 'user')
+          .map(m => m.content.toLowerCase()),
         message.toLowerCase()
       ].join(' ');
 
-      console.log(`🔍 [CUSTOMER_UPDATE] Analisando conversa: "${fullConversation.substring(0, 200)}..."`);
+      console.log(`🔍 [CUSTOMER_UPDATE] Analisando mensagens do usuário: "${userMessagesOnly.substring(0, 200)}..."`);
 
       // Lista de tipos de imóvel (ordenados por tamanho para evitar falsos positivos)
       const tiposImovelMap: Array<[string, string]> = [
@@ -1961,7 +2037,7 @@ ${whatsappLink}`;
       if (!customer.interestedPropertyType) {
         for (const [variacao, tipo] of tiposImovelMap) {
           const regex = new RegExp(`(^|\\s|[^a-záàâãéèêíìîóòôõúùûç])${variacao}($|\\s|[^a-záàâãéèêíìîóòôõúùûç])`, 'i');
-          if (regex.test(fullConversation)) {
+          if (regex.test(userMessagesOnly)) {
             updates.interestedPropertyType = tipo;
             shouldUpdate = true;
             console.log(`🏠 [CUSTOMER_UPDATE] Tipo de imóvel detectado: ${tipo}`);
@@ -1978,7 +2054,7 @@ ${whatsappLink}`;
         ];
 
         for (const [regex, tipo] of transactionPatterns) {
-          if (regex.test(fullConversation)) {
+          if (regex.test(userMessagesOnly)) {
             updates.interestedTransactionType = tipo;
             shouldUpdate = true;
             console.log(`💼 [CUSTOMER_UPDATE] Tipo de transação detectado: ${tipo}`);
@@ -1998,12 +2074,12 @@ ${whatsappLink}`;
           const cityNameNormalized = cityNameLower
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '');
-          const conversationNormalized = fullConversation
+          const userMessagesNormalized = userMessagesOnly
             .normalize('NFD')
             .replace(/[\u0300-\u036f]/g, '');
 
-          // Verificar se o nome da cidade aparece na conversa (com ou sem acento)
-          if (fullConversation.includes(cityNameLower) || conversationNormalized.includes(cityNameNormalized)) {
+          // Verificar se o nome da cidade aparece nas mensagens do usuário (com ou sem acento)
+          if (userMessagesOnly.includes(cityNameLower) || userMessagesNormalized.includes(cityNameNormalized)) {
             updates.interestedCityId = city.name; // Salva o NOME da cidade, não o ID
             shouldUpdate = true;
             console.log(`🌆 [CUSTOMER_UPDATE] Cidade detectada: ${city.name}`);
