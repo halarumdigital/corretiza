@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,7 +14,8 @@ import { Badge } from "@/components/ui/badge";
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
 import { useToast } from "@/hooks/use-toast";
 import * as Icons from "lucide-react";
-import { Home, Plus, MoreVertical, Edit, Power, MapPin, Car, Bath, Bed, Search, Upload, X, Image as ImageIcon } from "lucide-react";
+import { Home, Plus, MoreVertical, Edit, Power, MapPin, Car, Bath, Bed, Search, Upload, X, Image as ImageIcon, FileSpreadsheet, Download, AlertCircle, CheckCircle2, Loader2, ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight } from "lucide-react";
+import * as XLSX from "xlsx";
 
 interface Property {
   id: string;
@@ -40,6 +41,7 @@ interface Property {
   images: string[];
   youtubeVideoUrl?: string;
   amenities: string[];
+  price?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -82,7 +84,58 @@ interface PropertyFormData {
   images: string[];
   youtubeVideoUrl?: string;
   amenities: string[]; // Array of amenity IDs
+  price: string; // Valor formatado (ex: 1.450,00)
 }
+
+interface ImportedProperty {
+  codigo: string;
+  nome: string;
+  tipo_imovel?: string;
+  transacao: string;
+  rua: string;
+  numero: string;
+  bairro: string;
+  cidade: string;
+  estado: string;
+  cep?: string;
+  area_privativa: number;
+  vagas: number;
+  banheiros: number;
+  quartos: number;
+  descricao?: string;
+  valor?: number;
+  proximidade?: string;
+  valid?: boolean;
+  error?: string;
+}
+
+// Função para formatar valor no padrão brasileiro
+const formatCurrency = (value: string): string => {
+  // Remove tudo exceto números
+  const numbers = value.replace(/\D/g, '');
+
+  if (!numbers) return '';
+
+  // Converte para número e divide por 100 para ter os centavos
+  const amount = parseInt(numbers) / 100;
+
+  // Formata no padrão brasileiro
+  return amount.toLocaleString('pt-BR', {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+};
+
+// Função para converter valor formatado para número (para salvar no banco)
+const parseCurrency = (value: string): number | null => {
+  if (!value) return null;
+
+  // Remove pontos de milhar e substitui vírgula por ponto
+  const cleanValue = value.replace(/\./g, '').replace(',', '.');
+  const parsed = parseFloat(cleanValue);
+
+  return isNaN(parsed) ? null : parsed;
+};
 
 const brazilianStates = [
   { value: "AC", label: "Acre" },
@@ -118,7 +171,21 @@ export default function MeusImoveis() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [editingProperty, setEditingProperty] = useState<Property | null>(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [filterTransactionType, setFilterTransactionType] = useState<string>("all");
+  const [filterPropertyType, setFilterPropertyType] = useState<string>("all");
   const [uploadingImages, setUploadingImages] = useState(false);
+
+  // Pagination states
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 50;
+
+  // Import states
+  const [isImportDialogOpen, setIsImportDialogOpen] = useState(false);
+  const [importedData, setImportedData] = useState<ImportedProperty[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importProgress, setImportProgress] = useState({ current: 0, total: 0 });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -142,7 +209,8 @@ export default function MeusImoveis() {
     transactionType: "venda",
     images: [],
     youtubeVideoUrl: "",
-    amenities: []
+    amenities: [],
+    price: ""
   });
 
   // Fetch properties
@@ -206,16 +274,43 @@ export default function MeusImoveis() {
     staleTime: 5 * 60 * 1000, // Consider data stale after 5 minutes
   });
 
-  // Filter properties based on search term
+  // Filter properties based on search term and filters
   const filteredProperties = properties.filter((property) => {
-    if (!searchTerm) return true;
-    
-    const searchLower = searchTerm.toLowerCase().trim();
-    return (
-      property.name.toLowerCase().includes(searchLower) ||
-      property.code.toLowerCase().includes(searchLower)
-    );
+    // Filter by search term
+    if (searchTerm) {
+      const searchLower = searchTerm.toLowerCase().trim();
+      if (!property.name.toLowerCase().includes(searchLower) &&
+          !property.code.toLowerCase().includes(searchLower)) {
+        return false;
+      }
+    }
+
+    // Filter by transaction type
+    if (filterTransactionType !== "all" && property.transactionType !== filterTransactionType) {
+      return false;
+    }
+
+    // Filter by property type
+    if (filterPropertyType !== "all" && property.propertyType !== filterPropertyType) {
+      return false;
+    }
+
+    return true;
   });
+
+  // Pagination calculations
+  const totalPages = Math.ceil(filteredProperties.length / itemsPerPage);
+  const startIndex = (currentPage - 1) * itemsPerPage;
+  const endIndex = startIndex + itemsPerPage;
+  const paginatedProperties = filteredProperties.slice(startIndex, endIndex);
+
+  // Reset page when filters change
+  const handleFilterChange = (type: 'search' | 'transaction' | 'property', value: string) => {
+    setCurrentPage(1);
+    if (type === 'search') setSearchTerm(value);
+    if (type === 'transaction') setFilterTransactionType(value);
+    if (type === 'property') setFilterPropertyType(value);
+  };
 
   // Create property mutation
   const createPropertyMutation = useMutation({
@@ -339,7 +434,8 @@ export default function MeusImoveis() {
       transactionType: "venda",
       images: [],
       youtubeVideoUrl: "",
-      amenities: []
+      amenities: [],
+      price: ""
     });
   };
 
@@ -432,6 +528,8 @@ export default function MeusImoveis() {
       amenities: formData.amenities,
       // Include images array
       images: formData.images,
+      // Convert price from Brazilian format to number
+      price: parseCurrency(formData.price),
     };
 
     if (editingProperty) {
@@ -443,6 +541,17 @@ export default function MeusImoveis() {
 
   const handleEdit = (property: Property) => {
     setEditingProperty(property);
+    // Formata o preço do banco (número) para formato brasileiro
+    let formattedPrice = "";
+    if (property.price) {
+      const priceNum = parseFloat(property.price);
+      if (!isNaN(priceNum)) {
+        formattedPrice = priceNum.toLocaleString('pt-BR', {
+          minimumFractionDigits: 2,
+          maximumFractionDigits: 2,
+        });
+      }
+    }
     setFormData({
       code: property.code,
       name: property.name,
@@ -463,7 +572,8 @@ export default function MeusImoveis() {
       transactionType: property.transactionType || "venda",
       images: property.images || [],
       youtubeVideoUrl: property.youtubeVideoUrl || "",
-      amenities: property.amenities || []
+      amenities: property.amenities || [],
+      price: formattedPrice
     });
     setIsAddDialogOpen(true);
   };
@@ -554,6 +664,234 @@ export default function MeusImoveis() {
     }
   };
 
+  // Função para processar arquivo Excel/CSV
+  const handleFileUpload = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      try {
+        const data = e.target?.result;
+        const workbook = XLSX.read(data, { type: 'binary' });
+        const sheetName = workbook.SheetNames[0];
+        const worksheet = workbook.Sheets[sheetName];
+        const jsonData = XLSX.utils.sheet_to_json(worksheet);
+
+        // Mapear e validar os dados
+        const mappedData: ImportedProperty[] = jsonData.map((row: any) => {
+          const item: ImportedProperty = {
+            codigo: String(row['codigo'] || row['Código'] || row['CODIGO'] || ''),
+            nome: String(row['nome'] || row['Nome'] || row['NOME'] || ''),
+            tipo_imovel: String(row['tipo_imovel'] || row['tipo'] || row['Tipo'] || row['TIPO'] || '').toLowerCase(),
+            transacao: String(row['transacao'] || row['Transação'] || row['TRANSACAO'] || 'venda').toLowerCase(),
+            rua: String(row['rua'] || row['Rua'] || row['RUA'] || row['endereco'] || row['Endereço'] || ''),
+            numero: String(row['numero'] || row['Número'] || row['NUMERO'] || ''),
+            bairro: String(row['bairro'] || row['Bairro'] || row['BAIRRO'] || ''),
+            cidade: String(row['cidade'] || row['Cidade'] || row['CIDADE'] || ''),
+            estado: String(row['estado'] || row['Estado'] || row['ESTADO'] || row['uf'] || row['UF'] || '').toUpperCase(),
+            cep: String(row['cep'] || row['CEP'] || ''),
+            area_privativa: parseFloat(row['area_privativa'] || row['area'] || row['Área'] || row['AREA'] || 0),
+            vagas: parseInt(row['vagas'] || row['Vagas'] || row['VAGAS'] || 0),
+            banheiros: parseInt(row['banheiros'] || row['Banheiros'] || row['BANHEIROS'] || 1),
+            quartos: parseInt(row['quartos'] || row['Quartos'] || row['QUARTOS'] || 0),
+            descricao: String(row['descricao'] || row['Descrição'] || row['DESCRICAO'] || ''),
+            valor: parseFloat(String(row['valor'] || row['Valor'] || row['VALOR'] || row['preco'] || row['Preço'] || 0).replace(/[^\d.,]/g, '').replace(',', '.')),
+            proximidade: String(row['proximidade'] || row['Proximidade'] || row['PROXIMIDADE'] || ''),
+            valid: true,
+            error: ''
+          };
+
+          // Validar campos obrigatórios
+          const errors: string[] = [];
+          if (!item.codigo) errors.push('Código obrigatório');
+          if (!item.nome) errors.push('Nome obrigatório');
+          if (!item.rua) errors.push('Rua obrigatória');
+          if (!item.numero) errors.push('Número obrigatório');
+          if (!item.bairro) errors.push('Bairro obrigatório');
+          if (!item.cidade) errors.push('Cidade obrigatória');
+          if (!item.estado) errors.push('Estado obrigatório');
+          if (!item.area_privativa || item.area_privativa <= 0) errors.push('Área privativa inválida');
+
+          // Normalizar tipo de transação
+          if (item.transacao === 'locação' || item.transacao === 'locacao' || item.transacao === 'aluguel') {
+            item.transacao = 'locacao';
+          } else {
+            item.transacao = 'venda';
+          }
+
+          // Normalizar tipo de imóvel
+          const tipoMap: { [key: string]: string } = {
+            'casa': 'casa',
+            'apartamento': 'apartamento',
+            'apto': 'apartamento',
+            'sala': 'sala',
+            'sala comercial': 'sala',
+            'terreno': 'terreno',
+            'lote': 'terreno',
+            'sobrado': 'sobrado',
+            'chácara': 'chácara',
+            'chacara': 'chácara',
+            'sitio': 'chácara',
+            'sítio': 'chácara'
+          };
+          item.tipo_imovel = tipoMap[item.tipo_imovel || ''] || '';
+
+          if (errors.length > 0) {
+            item.valid = false;
+            item.error = errors.join(', ');
+          }
+
+          return item;
+        });
+
+        setImportedData(mappedData);
+        toast({
+          description: `${mappedData.length} imóveis carregados do arquivo.`
+        });
+      } catch (error) {
+        console.error('Error parsing file:', error);
+        toast({
+          variant: "destructive",
+          description: "Erro ao processar arquivo. Verifique o formato."
+        });
+      }
+    };
+    reader.readAsBinaryString(file);
+
+    // Reset input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
+  // Função para baixar modelo de planilha
+  const downloadTemplate = () => {
+    const template = [
+      {
+        codigo: 'IMV001',
+        nome: 'Apartamento Centro',
+        tipo_imovel: 'apartamento',
+        transacao: 'venda',
+        rua: 'Rua das Flores',
+        numero: '123',
+        bairro: 'Centro',
+        cidade: 'São Paulo',
+        estado: 'SP',
+        cep: '01234-567',
+        area_privativa: 85.5,
+        vagas: 2,
+        banheiros: 2,
+        quartos: 3,
+        descricao: 'Apartamento espaçoso com vista para o parque',
+        valor: 450000,
+        proximidade: 'Próximo ao metrô'
+      }
+    ];
+
+    const ws = XLSX.utils.json_to_sheet(template);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, 'Modelo');
+
+    // Ajustar largura das colunas
+    ws['!cols'] = [
+      { wch: 10 }, // codigo
+      { wch: 25 }, // nome
+      { wch: 15 }, // tipo_imovel
+      { wch: 10 }, // transacao
+      { wch: 25 }, // rua
+      { wch: 8 },  // numero
+      { wch: 15 }, // bairro
+      { wch: 15 }, // cidade
+      { wch: 5 },  // estado
+      { wch: 12 }, // cep
+      { wch: 15 }, // area_privativa
+      { wch: 8 },  // vagas
+      { wch: 10 }, // banheiros
+      { wch: 8 },  // quartos
+      { wch: 40 }, // descricao
+      { wch: 12 }, // valor
+      { wch: 25 }, // proximidade
+    ];
+
+    XLSX.writeFile(wb, 'modelo_imoveis.xlsx');
+  };
+
+  // Função para importar os imóveis
+  const handleImportProperties = async () => {
+    const validItems = importedData.filter(item => item.valid);
+
+    if (validItems.length === 0) {
+      toast({
+        variant: "destructive",
+        description: "Nenhum imóvel válido para importar."
+      });
+      return;
+    }
+
+    setIsImporting(true);
+    setImportProgress({ current: 0, total: validItems.length });
+
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (let i = 0; i < validItems.length; i++) {
+      const item = validItems[i];
+
+      try {
+        const propertyData = {
+          code: item.codigo,
+          name: item.nome,
+          propertyType: item.tipo_imovel || null,
+          transactionType: item.transacao,
+          street: item.rua,
+          number: item.numero,
+          neighborhood: item.bairro,
+          city: item.cidade,
+          state: item.estado,
+          zipCode: item.cep || null,
+          privateArea: item.area_privativa,
+          parkingSpaces: item.vagas,
+          bathrooms: item.banheiros,
+          bedrooms: item.quartos,
+          description: item.descricao || null,
+          price: item.valor || null,
+          proximity: item.proximidade || null,
+          images: [],
+          amenities: []
+        };
+
+        const response = await fetch("/api/properties", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Authorization: `Bearer ${localStorage.getItem("token")}`
+          },
+          body: JSON.stringify(propertyData)
+        });
+
+        if (response.ok) {
+          successCount++;
+        } else {
+          errorCount++;
+        }
+      } catch (error) {
+        errorCount++;
+      }
+
+      setImportProgress({ current: i + 1, total: validItems.length });
+    }
+
+    setIsImporting(false);
+    setIsImportDialogOpen(false);
+    setImportedData([]);
+    queryClient.invalidateQueries({ queryKey: ["/api/properties"] });
+
+    toast({
+      description: `Importação concluída: ${successCount} imóveis criados${errorCount > 0 ? `, ${errorCount} erros` : ''}.`
+    });
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
@@ -561,14 +899,191 @@ export default function MeusImoveis() {
           <Home className="w-6 h-6" />
           <h1 className="text-2xl font-bold">Meus Imóveis</h1>
         </div>
-        
-        <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
-          <DialogTrigger asChild>
-            <Button onClick={() => setIsAddDialogOpen(true)} className="bg-green-600 hover:bg-green-700">
-              <Plus className="w-4 h-4 mr-2" />
-              Adicionar Novo
-            </Button>
-          </DialogTrigger>
+
+        <div className="flex items-center gap-2">
+          {/* Botão Importar */}
+          <Button
+            variant="outline"
+            onClick={() => setIsImportDialogOpen(true)}
+          >
+            <FileSpreadsheet className="w-4 h-4 mr-2" />
+            Importar
+          </Button>
+
+          {/* Dialog de Importação */}
+          <Dialog open={isImportDialogOpen} onOpenChange={(open) => {
+            setIsImportDialogOpen(open);
+            if (!open) {
+              setImportedData([]);
+            }
+          }}>
+            <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>Importar Imóveis em Massa</DialogTitle>
+                <DialogDescription>
+                  Faça upload de um arquivo Excel (.xlsx) ou CSV com os dados dos imóveis.
+                </DialogDescription>
+              </DialogHeader>
+
+              <div className="space-y-4">
+                {/* Botão para baixar modelo */}
+                <div className="flex items-center justify-between p-4 bg-muted rounded-lg">
+                  <div>
+                    <p className="font-medium">Modelo de Planilha</p>
+                    <p className="text-sm text-muted-foreground">
+                      Baixe o modelo para preencher corretamente os dados
+                    </p>
+                  </div>
+                  <Button variant="outline" onClick={downloadTemplate}>
+                    <Download className="w-4 h-4 mr-2" />
+                    Baixar Modelo
+                  </Button>
+                </div>
+
+                {/* Upload de arquivo */}
+                <div className="space-y-2">
+                  <Label>Selecionar Arquivo</Label>
+                  <div className="flex items-center gap-2">
+                    <Input
+                      ref={fileInputRef}
+                      type="file"
+                      accept=".xlsx,.xls,.csv"
+                      onChange={handleFileUpload}
+                      className="flex-1"
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Formatos aceitos: Excel (.xlsx, .xls) ou CSV (.csv)
+                  </p>
+                </div>
+
+                {/* Preview dos dados */}
+                {importedData.length > 0 && (
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <Label>Preview dos Dados ({importedData.length} imóveis)</Label>
+                      <div className="flex items-center gap-4 text-sm">
+                        <span className="flex items-center text-green-600">
+                          <CheckCircle2 className="w-4 h-4 mr-1" />
+                          {importedData.filter(i => i.valid).length} válidos
+                        </span>
+                        <span className="flex items-center text-red-600">
+                          <AlertCircle className="w-4 h-4 mr-1" />
+                          {importedData.filter(i => !i.valid).length} com erros
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="border rounded-lg overflow-x-auto max-h-[300px]">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="w-10">Status</TableHead>
+                            <TableHead>Código</TableHead>
+                            <TableHead>Nome</TableHead>
+                            <TableHead>Tipo</TableHead>
+                            <TableHead>Transação</TableHead>
+                            <TableHead>Cidade/UF</TableHead>
+                            <TableHead>Área</TableHead>
+                            <TableHead>Valor</TableHead>
+                            <TableHead>Erro</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {importedData.map((item, index) => (
+                            <TableRow key={index} className={!item.valid ? "bg-red-50" : ""}>
+                              <TableCell>
+                                {item.valid ? (
+                                  <CheckCircle2 className="w-4 h-4 text-green-600" />
+                                ) : (
+                                  <AlertCircle className="w-4 h-4 text-red-600" />
+                                )}
+                              </TableCell>
+                              <TableCell className="font-mono text-sm">{item.codigo}</TableCell>
+                              <TableCell>{item.nome}</TableCell>
+                              <TableCell>{item.tipo_imovel || '-'}</TableCell>
+                              <TableCell>
+                                <Badge variant={item.transacao === 'venda' ? 'default' : 'outline'}>
+                                  {item.transacao === 'venda' ? 'Venda' : 'Locação'}
+                                </Badge>
+                              </TableCell>
+                              <TableCell>{item.cidade}/{item.estado}</TableCell>
+                              <TableCell>{item.area_privativa}m²</TableCell>
+                              <TableCell>
+                                {item.valor ? `R$ ${item.valor.toLocaleString('pt-BR')}` : '-'}
+                              </TableCell>
+                              <TableCell className="text-red-600 text-xs max-w-[200px] truncate">
+                                {item.error || '-'}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </div>
+                )}
+
+                {/* Barra de progresso durante importação */}
+                {isImporting && (
+                  <div className="space-y-2 p-4 bg-blue-50 rounded-lg">
+                    <div className="flex items-center gap-2">
+                      <Loader2 className="w-4 h-4 animate-spin" />
+                      <span>Importando imóveis...</span>
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2">
+                      <div
+                        className="bg-blue-600 h-2 rounded-full transition-all"
+                        style={{ width: `${(importProgress.current / importProgress.total) * 100}%` }}
+                      />
+                    </div>
+                    <p className="text-sm text-muted-foreground">
+                      {importProgress.current} de {importProgress.total} imóveis processados
+                    </p>
+                  </div>
+                )}
+
+                {/* Botões de ação */}
+                <div className="flex justify-end gap-2 pt-4">
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      setIsImportDialogOpen(false);
+                      setImportedData([]);
+                    }}
+                    disabled={isImporting}
+                  >
+                    Cancelar
+                  </Button>
+                  <Button
+                    onClick={handleImportProperties}
+                    disabled={importedData.length === 0 || isImporting || importedData.filter(i => i.valid).length === 0}
+                    className="bg-green-600 hover:bg-green-700"
+                  >
+                    {isImporting ? (
+                      <>
+                        <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                        Importando...
+                      </>
+                    ) : (
+                      <>
+                        <Upload className="w-4 h-4 mr-2" />
+                        Importar {importedData.filter(i => i.valid).length} Imóveis
+                      </>
+                    )}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          {/* Dialog de Adicionar/Editar */}
+          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+            <DialogTrigger asChild>
+              <Button onClick={() => setIsAddDialogOpen(true)} className="bg-green-600 hover:bg-green-700">
+                <Plus className="w-4 h-4 mr-2" />
+                Adicionar Novo
+              </Button>
+            </DialogTrigger>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>
@@ -577,7 +1092,7 @@ export default function MeusImoveis() {
             </DialogHeader>
             
             <form onSubmit={handleSubmit} className="space-y-4">
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
                 <div className="space-y-2">
                   <Label htmlFor="code">Código do Imóvel *</Label>
                   <Input
@@ -628,6 +1143,16 @@ export default function MeusImoveis() {
                       <SelectItem value="locacao">Locação</SelectItem>
                     </SelectContent>
                   </Select>
+                </div>
+
+                <div className="space-y-2">
+                  <Label htmlFor="price">Valor (R$)</Label>
+                  <Input
+                    id="price"
+                    value={formData.price}
+                    onChange={(e) => setFormData({...formData, price: formatCurrency(e.target.value)})}
+                    placeholder="Ex: 1.450,00"
+                  />
                 </div>
               </div>
 
@@ -967,26 +1492,65 @@ export default function MeusImoveis() {
             </form>
           </DialogContent>
         </Dialog>
+        </div>
       </div>
 
-      {/* Search Section */}
-      <div className="flex items-center space-x-4">
-        <div className="relative flex-1 max-w-md">
+      {/* Search and Filters Section */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4">
+        <div className="relative flex-1 max-w-md w-full">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground w-4 h-4" />
           <Input
             placeholder="Buscar por nome ou código do imóvel..."
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleFilterChange('search', e.target.value)}
             className="pl-10"
           />
         </div>
-        {searchTerm && (
+
+        {/* Transaction Type Filter */}
+        <div className="w-full sm:w-40">
+          <Select value={filterTransactionType} onValueChange={(value) => handleFilterChange('transaction', value)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Transação" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todas Transações</SelectItem>
+              <SelectItem value="venda">Venda</SelectItem>
+              <SelectItem value="locacao">Locação</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Property Type Filter */}
+        <div className="w-full sm:w-44">
+          <Select value={filterPropertyType} onValueChange={(value) => handleFilterChange('property', value)}>
+            <SelectTrigger>
+              <SelectValue placeholder="Tipo de Imóvel" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Todos os Tipos</SelectItem>
+              <SelectItem value="casa">Casa</SelectItem>
+              <SelectItem value="apartamento">Apartamento</SelectItem>
+              <SelectItem value="sala">Sala Comercial</SelectItem>
+              <SelectItem value="terreno">Terreno</SelectItem>
+              <SelectItem value="sobrado">Sobrado</SelectItem>
+              <SelectItem value="chácara">Chácara</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        {(searchTerm || filterTransactionType !== "all" || filterPropertyType !== "all") && (
           <Button
             variant="outline"
             size="sm"
-            onClick={() => setSearchTerm("")}
+            onClick={() => {
+              setCurrentPage(1);
+              setSearchTerm("");
+              setFilterTransactionType("all");
+              setFilterPropertyType("all");
+            }}
           >
-            Limpar
+            Limpar Filtros
           </Button>
         )}
       </div>
@@ -997,8 +1561,11 @@ export default function MeusImoveis() {
             <CardTitle>Lista de Imóveis</CardTitle>
             {properties.length > 0 && (
               <div className="text-sm text-muted-foreground">
-                {searchTerm ? (
-                  <>Mostrando {filteredProperties.length} de {properties.length} imóveis</>
+                {filteredProperties.length > 0 ? (
+                  <>
+                    Mostrando {startIndex + 1}-{Math.min(endIndex, filteredProperties.length)} de {filteredProperties.length} imóveis
+                    {filteredProperties.length !== properties.length && ` (${properties.length} total)`}
+                  </>
                 ) : (
                   <>{properties.length} {properties.length === 1 ? 'imóvel' : 'imóveis'}</>
                 )}
@@ -1019,9 +1586,10 @@ export default function MeusImoveis() {
             </div>
           ) : filteredProperties.length === 0 ? (
             <div className="text-center py-8 text-muted-foreground">
-              Nenhum imóvel encontrado com o termo "{searchTerm}".
+              Nenhum imóvel encontrado com os filtros aplicados.
             </div>
           ) : (
+            <div className="space-y-4">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader>
@@ -1029,6 +1597,7 @@ export default function MeusImoveis() {
                     <TableHead>Código</TableHead>
                     <TableHead>Nome</TableHead>
                     <TableHead>Tipo</TableHead>
+                    <TableHead>Transação</TableHead>
                     <TableHead>Endereço</TableHead>
                     <TableHead>Detalhes</TableHead>
                     <TableHead>Área</TableHead>
@@ -1037,14 +1606,34 @@ export default function MeusImoveis() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {filteredProperties.map((property) => (
+                  {paginatedProperties.map((property) => (
                     <TableRow key={property.id}>
                       <TableCell className="font-medium">{property.code}</TableCell>
                       <TableCell>{property.name}</TableCell>
                       <TableCell>
-                        <Badge variant={property.transactionType === "venda" ? "default" : "outline"}>
-                          {property.transactionType === "venda" ? "Venda" : "Locação"}
+                        <Badge
+                          variant="secondary"
+                          className="bg-slate-100 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
+                        >
+                          {property.propertyType === "casa" && "Casa"}
+                          {property.propertyType === "apartamento" && "Apartamento"}
+                          {property.propertyType === "sala" && "Sala Comercial"}
+                          {property.propertyType === "terreno" && "Terreno"}
+                          {property.propertyType === "sobrado" && "Sobrado"}
+                          {property.propertyType === "chácara" && "Chácara"}
+                          {!property.propertyType && "-"}
                         </Badge>
+                      </TableCell>
+                      <TableCell>
+                        {property.transactionType === "venda" ? (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                            Venda
+                          </span>
+                        ) : (
+                          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-orange-100 text-orange-800">
+                            Locação
+                          </span>
+                        )}
                       </TableCell>
                       <TableCell>
                         <div className="text-sm">
@@ -1115,6 +1704,78 @@ export default function MeusImoveis() {
                   ))}
                 </TableBody>
               </Table>
+            </div>
+
+            {/* Pagination */}
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between pt-4">
+                <div className="text-sm text-muted-foreground">
+                  Página {currentPage} de {totalPages}
+                </div>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronsLeft className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="w-4 h-4" />
+                  </Button>
+
+                  {/* Page numbers */}
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let pageNum;
+                      if (totalPages <= 5) {
+                        pageNum = i + 1;
+                      } else if (currentPage <= 3) {
+                        pageNum = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        pageNum = totalPages - 4 + i;
+                      } else {
+                        pageNum = currentPage - 2 + i;
+                      }
+                      return (
+                        <Button
+                          key={pageNum}
+                          variant={currentPage === pageNum ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(pageNum)}
+                          className="w-8 h-8 p-0"
+                        >
+                          {pageNum}
+                        </Button>
+                      );
+                    })}
+                  </div>
+
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    <ChevronRight className="w-4 h-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                  >
+                    <ChevronsRight className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            )}
             </div>
           )}
         </CardContent>

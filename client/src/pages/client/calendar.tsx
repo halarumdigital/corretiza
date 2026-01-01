@@ -126,10 +126,11 @@ export default function Calendar() {
 
   // Get appointments for a specific day
   const getAppointmentsForDay = (day: number) => {
-    const dateStr = new Date(currentDate.getFullYear(), currentDate.getMonth(), day);
     return appointments.filter(apt => {
-      if (!apt.createdAt) return false;
-      const aptDate = new Date(apt.createdAt);
+      // Usar scheduledDate se disponível, senão usar createdAt
+      const dateToUse = apt.scheduledDate || apt.createdAt;
+      if (!dateToUse) return false;
+      const aptDate = new Date(dateToUse);
       return aptDate.getDate() === day &&
         aptDate.getMonth() === currentDate.getMonth() &&
         aptDate.getFullYear() === currentDate.getFullYear();
@@ -341,7 +342,7 @@ export default function Calendar() {
                       </div>
                     </div>
                     <div className="text-right text-sm text-muted-foreground">
-                      <p>{new Date(appointment.createdAt).toLocaleDateString('pt-BR')}</p>
+                      <p>{new Date(appointment.scheduledDate || appointment.createdAt).toLocaleDateString('pt-BR')}</p>
                       <p className="text-xs">{appointment.source}</p>
                     </div>
                   </div>

@@ -788,12 +788,12 @@ export default function AiAgents() {
                 <Select 
                   value={formData.agentType} 
                   onValueChange={(value: "main" | "secondary") => {
-                    setFormData(prev => ({ 
-                      ...prev, 
+                    setFormData(prev => ({
+                      ...prev,
                       agentType: value,
                       parentAgentId: value === "main" ? "" : prev.parentAgentId,
                       specialization: value === "main" ? "" : prev.specialization,
-                      delegationKeywords: value === "main" ? prev.delegationKeywords : []
+                      delegationKeywords: value === "main" ? [] : prev.delegationKeywords
                     }));
                   }}
                 >
@@ -866,14 +866,14 @@ export default function AiAgents() {
                         id="newKeyword"
                         data-testid="input-new-keyword"
                         placeholder="Digite uma palavra-chave e pressione Enter"
-                        onKeyPress={(e) => {
+                        onKeyDown={(e) => {
                           if (e.key === 'Enter') {
                             e.preventDefault();
                             const input = e.target as HTMLInputElement;
                             const keyword = input.value.trim();
                             if (keyword && !formData.delegationKeywords.includes(keyword)) {
-                              setFormData(prev => ({ 
-                                ...prev, 
+                              setFormData(prev => ({
+                                ...prev,
                                 delegationKeywords: [...prev.delegationKeywords, keyword]
                               }));
                               input.value = '';

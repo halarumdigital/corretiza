@@ -117,6 +117,7 @@ export interface IStorage {
 
   // Properties
   getProperty(id: string): Promise<Property | undefined>;
+  getPropertyByCode(code: string, companyId: string): Promise<Property | undefined>;
   getPropertiesByCompany(companyId: string): Promise<Property[]>;
   searchProperties(companyId: string, filters: {
     city?: string;
@@ -197,6 +198,7 @@ export interface IStorage {
   getAppointment(id: string): Promise<Appointment | undefined>;
   getAppointmentsByCompany(companyId: string): Promise<Appointment[]>;
   getAppointmentsByBroker(brokerId: string): Promise<Appointment[]>;
+  getLastAppointmentOfDayWithBroker(companyId: string): Promise<Appointment | undefined>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: string, updates: Partial<Appointment>): Promise<Appointment>;
   deleteAppointment(id: string): Promise<void>;
@@ -2232,12 +2234,23 @@ export class MySQLStorage implements IStorage {
   // Property methods
   async getProperty(id: string): Promise<Property | undefined> {
     if (!this.connection) throw new Error('No database connection');
-    
+
     const [rows] = await this.connection.execute(
       'SELECT * FROM properties WHERE id = ?',
       [id]
     ) as [any[], mysql.FieldPacket[]];
-    
+
+    return rows.length > 0 ? this.parseProperty(rows[0]) : undefined;
+  }
+
+  async getPropertyByCode(code: string, companyId: string): Promise<Property | undefined> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT * FROM properties WHERE code = ? AND company_id = ?',
+      [code, companyId]
+    ) as [any[], mysql.FieldPacket[]];
+
     return rows.length > 0 ? this.parseProperty(rows[0]) : undefined;
   }
 
@@ -2326,14 +2339,18 @@ export class MySQLStorage implements IStorage {
     await this.connection.execute(`
       INSERT INTO properties (id, company_id, code, name, property_type, street, number, proximity,
         neighborhood, city, state, zip_code, private_area, parking_spaces, bathrooms,
-        bedrooms, description, map_location, transaction_type, status)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        bedrooms, description, map_location, transaction_type, status, images, youtube_video_url, amenities, price)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `, [
       id, property.companyId, property.code, property.name, property.propertyType || null, property.street,
       property.number, property.proximity || null, property.neighborhood || null, property.city || null,
       property.state || null, property.zipCode || null, property.privateArea, property.parkingSpaces || 0,
       property.bathrooms || 1, property.bedrooms || 0, property.description || null, property.mapLocation || null,
-      property.transactionType || 'venda', property.status || 'active'
+      property.transactionType || 'venda', property.status || 'active',
+      JSON.stringify((property as any).images || []),
+      (property as any).youtubeVideoUrl || null,
+      JSON.stringify((property as any).amenities || []),
+      property.price || null
     ]);
 
     const newProperty = await this.getProperty(id);
@@ -2435,6 +2452,10 @@ export class MySQLStorage implements IStorage {
     if (updates.featured !== undefined) {
       fields.push('featured = ?');
       values.push(updates.featured);
+    }
+    if (updates.price !== undefined) {
+      fields.push('price = ?');
+      values.push(updates.price);
     }
 
     if (fields.length === 0) {
@@ -2675,6 +2696,7 @@ export class MySQLStorage implements IStorage {
       youtubeVideoUrl: row.youtube_video_url || "",
       amenities: row.amenities ? (typeof row.amenities === 'string' ? JSON.parse(row.amenities) : row.amenities) : [],
       featured: row.featured || false,
+      price: row.price ? row.price.toString() : null,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -3488,6 +3510,29 @@ export class MySQLStorage implements IStorage {
     );
 
     return (rows as any[]).map(row => this.mapAppointmentRow(row));
+  }
+
+  // Busca o último agendamento do dia que tem corretor atribuído (para rodízio)
+  async getLastAppointmentOfDayWithBroker(companyId: string): Promise<Appointment | undefined> {
+    if (!this.connection) throw new Error('No database connection');
+
+    // Buscar o último agendamento criado hoje que tenha um corretor atribuído
+    const [rows] = await this.connection.execute(
+      `SELECT * FROM appointments
+       WHERE company_id = ?
+       AND broker_id IS NOT NULL
+       AND DATE(created_at) = CURDATE()
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [companyId]
+    );
+
+    const appointments = rows as any[];
+    if (appointments.length === 0) {
+      return undefined;
+    }
+
+    return this.mapAppointmentRow(appointments[0]);
   }
 
   async createAppointment(appointment: InsertAppointment): Promise<Appointment> {

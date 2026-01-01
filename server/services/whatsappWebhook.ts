@@ -359,17 +359,73 @@ export class WhatsAppWebhookService {
         return;
       }
 
-      // Extrair o número do remetente CORRETO da mensagem - usar data.key.remoteJid
-      // Remover sufixos @s.whatsapp.net e @lid do número
-      const senderPhone = (evolutionData.data as any).key?.remoteJid?.replace(/@(s\.whatsapp\.net|lid)$/g, '');
+      // Extrair o número do remetente CORRETO da mensagem
+      // Primeiro verificar se é formato LID (Linked ID) que não é número real
+      const remoteJid = (evolutionData.data as any).key?.remoteJid || '';
+      const remoteJidAlt = (evolutionData.data as any).key?.remoteJidAlt || '';
+      const isLidFormat = remoteJid.endsWith('@lid');
+
+      console.log(`📞 [PHONE DEBUG] remoteJid: ${remoteJid}`);
+      console.log(`📞 [PHONE DEBUG] remoteJidAlt: ${remoteJidAlt}`);
+      console.log(`📞 [PHONE DEBUG] isLidFormat: ${isLidFormat}`);
+
+      let senderPhone: string | undefined;
+
+      if (isLidFormat) {
+        // LID não é número real - usar remoteJidAlt que contém o número real
+        console.log(`⚠️ [LID] Detectado formato LID - buscando número real...`);
+
+        // Primeiro tentar remoteJidAlt (campo principal para número real em LID)
+        if (remoteJidAlt && remoteJidAlt.includes('@s.whatsapp.net')) {
+          senderPhone = remoteJidAlt.replace(/@s\.whatsapp\.net$/g, '');
+          console.log(`✅ [LID] Número real encontrado em remoteJidAlt: ${senderPhone}`);
+        } else {
+          // Fallback: tentar outros campos
+          const evolutionMessage = evolutionData.data as any;
+
+          // Campos possíveis para o número real
+          const possiblePhoneFields = [
+            evolutionMessage.key?.participant?.replace(/@s\.whatsapp\.net$/g, ''),
+            evolutionMessage.participant?.replace(/@s\.whatsapp\.net$/g, ''),
+            (evolutionData as any).phone,
+            (evolutionData as any).from?.replace(/@s\.whatsapp\.net$/g, ''),
+            evolutionMessage.from?.replace(/@s\.whatsapp\.net$/g, ''),
+          ];
+
+          console.log(`📞 [LID DEBUG] Possíveis campos de telefone:`, JSON.stringify(possiblePhoneFields, null, 2));
+
+          // Encontrar o primeiro número válido (que parece um telefone brasileiro)
+          for (const field of possiblePhoneFields) {
+            if (field) {
+              const cleanPhone = String(field).replace(/\D/g, '');
+              // Verificar se parece um telefone válido (10-13 dígitos)
+              if (cleanPhone.length >= 10 && cleanPhone.length <= 13) {
+                senderPhone = cleanPhone;
+                console.log(`✅ [LID] Número real encontrado em campo alternativo: ${senderPhone}`);
+                break;
+              }
+            }
+          }
+
+          // Se não encontrou número real, usar o LID mesmo (vai ficar no log)
+          if (!senderPhone) {
+            console.log(`❌ [LID] Não foi possível encontrar número real - usando LID como fallback`);
+            senderPhone = remoteJid.replace(/@lid$/g, '');
+          }
+        }
+      } else {
+        // Formato normal - extrair número do remoteJid
+        senderPhone = remoteJid.replace(/@s\.whatsapp\.net$/g, '');
+      }
+
       if (!senderPhone) {
         console.log("❌ Could not extract sender phone from Evolution message");
         console.log("❌ Debug - data.key:", (evolutionData.data as any).key);
         console.log("❌ Debug - evolutionData.sender:", evolutionData.sender);
         return;
       }
-      
-      console.log(`📞 Sender phone extracted: ${senderPhone} (from remoteJid: ${(evolutionData.data as any).key?.remoteJid})`);
+
+      console.log(`📞 Sender phone extracted: ${senderPhone} (from remoteJid: ${remoteJid}, isLid: ${isLidFormat})`);
       
       // Extrair o pushName (nome do contato no WhatsApp)
       console.log(`👤 [PUSHNAME DEBUG] Buscando pushName...`);
@@ -552,6 +608,26 @@ export class WhatsAppWebhookService {
             }
 
             console.log(`✅ [PROPERTIES] Todos os ${aiResponse.properties.length} imóveis foram processados`);
+
+            // Enviar mensagem de fechamento com opções claras
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // Verificar se há mais imóveis disponíveis usando o campo hasMoreProperties
+            const hasMore = aiResponse.hasMoreProperties === true;
+
+            // Mensagem SEMPRE perguntando se quer ver mais ou agendar
+            let mensagemFechamento = "";
+
+            if (hasMore) {
+              // Há mais imóveis - oferecer opção de ver mais OU agendar
+              mensagemFechamento = `Você gostaria de ver mais ou quer agendar uma visita?`;
+            } else {
+              // Não há mais imóveis - apenas oferecer agendamento
+              mensagemFechamento = `Esses são todos os imóveis disponíveis!\n\nQual deles você gostou? Me diga o código para agendar uma visita.`;
+            }
+
+            await this.sendResponse(instanceName, senderPhone, mensagemFechamento, '', dbInstance.companyId);
+            console.log(`✅ [PROPERTIES] Mensagem de fechamento com opções enviada após imóveis (hasMore: ${hasMore})`);
           }
         } else {
           // Fallback para o formato antigo (apenas texto sem imóveis estruturados)

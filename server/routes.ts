@@ -4449,22 +4449,23 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
   app.post("/api/properties", authenticate, requireClient, async (req: AuthRequest, res) => {
     try {
-      console.log("🔍 [PROPERTY CREATE] Request body:", JSON.stringify(req.body, null, 2));
-      
-      const result = insertPropertySchema.safeParse(req.body);
+      // Adiciona companyId antes da validação para que o schema passe
+      const bodyWithCompanyId = {
+        ...req.body,
+        companyId: req.user?.companyId!,
+      };
+
+      console.log("🔍 [PROPERTY CREATE] Request body:", JSON.stringify(bodyWithCompanyId, null, 2));
+
+      const result = insertPropertySchema.safeParse(bodyWithCompanyId);
       if (!result.success) {
         console.error("🔍 [PROPERTY CREATE] Validation failed:", JSON.stringify(result.error.errors, null, 2));
         return res.status(400).json({ error: result.error.errors });
       }
 
-      const propertyData = {
-        ...result.data,
-        companyId: req.user?.companyId!,
-      };
+      console.log("🔍 [PROPERTY CREATE] Final property data:", JSON.stringify(result.data, null, 2));
 
-      console.log("🔍 [PROPERTY CREATE] Final property data:", JSON.stringify(propertyData, null, 2));
-
-      const property = await storage.createProperty(propertyData);
+      const property = await storage.createProperty(result.data);
       res.status(201).json(property);
     } catch (error) {
       console.error("Create property error:", error);

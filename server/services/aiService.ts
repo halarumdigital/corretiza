@@ -3,6 +3,7 @@ import fs from 'fs';
 import path from 'path';
 import { getStorage } from "../storage";
 import { propertyService } from "./propertyService";
+import { EvolutionApiService } from "./evolutionApi";
 
 // the newest OpenAI model is "gpt-4o" which was released May 13, 2024. do not change this unless explicitly requested by the user
 
@@ -39,6 +40,7 @@ export interface AgentResponse {
   activeAgentType?: string;
   propertyImages?: string[]; // URLs das imagens dos imóveis encontrados (deprecated - usar properties)
   properties?: PropertyData[]; // Dados estruturados dos imóveis para envio sequencial
+  hasMoreProperties?: boolean; // Indica se há mais imóveis disponíveis para mostrar
 }
 
 export class AIService {
@@ -179,7 +181,8 @@ export class AIService {
         activeAgentName: activeAgent.name,
         activeAgentType: activeAgent.agentType || 'main',
         propertyImages: responseData.propertyImages, // deprecated
-        properties: responseData.properties // novo formato estruturado
+        properties: responseData.properties, // novo formato estruturado
+        hasMoreProperties: responseData.hasMoreProperties // indica se há mais imóveis disponíveis
       };
 
     } catch (error) {
@@ -383,7 +386,7 @@ export class AIService {
     }
   }
 
-  private async generateResponse(agent: any, context: MessageContext, aiConfig: any): Promise<{text: string, propertyImages?: string[], properties?: PropertyData[]}> {
+  private async generateResponse(agent: any, context: MessageContext, aiConfig: any): Promise<{text: string, propertyImages?: string[], properties?: PropertyData[], hasMoreProperties?: boolean}> {
     try {
       console.log(`🤖 [GENERATE] Starting generateResponse for agent: ${agent.name}`);
       console.log(`🔑 [GENERATE] API Key exists: ${!!aiConfig.apiKey}, length: ${aiConfig.apiKey?.length || 0}`);
@@ -400,6 +403,21 @@ export class AIService {
 
       // Construir o prompt do sistema baseado no agente (usando lógica do AiResponseService)
       let systemPrompt = agent.prompt || `Você é ${agent.name}, um assistente de IA especializado.`;
+
+      // 📅 ADICIONAR DATA ATUAL PARA O AGENTE SABER O DIA DE HOJE
+      const hoje = new Date();
+      const diasSemana = ['Domingo', 'Segunda-feira', 'Terça-feira', 'Quarta-feira', 'Quinta-feira', 'Sexta-feira', 'Sábado'];
+      const meses = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+      const dataFormatada = `${diasSemana[hoje.getDay()]}, ${hoje.getDate().toString().padStart(2, '0')}/${(hoje.getMonth() + 1).toString().padStart(2, '0')}/${hoje.getFullYear()}`;
+
+      systemPrompt += `\n\n=== DATA E HORA ATUAL ===\n`;
+      systemPrompt += `HOJE É: ${dataFormatada}\n`;
+      systemPrompt += `Ano atual: ${hoje.getFullYear()}\n`;
+      systemPrompt += `Mês atual: ${meses[hoje.getMonth()]} (${hoje.getMonth() + 1})\n`;
+      systemPrompt += `IMPORTANTE: Use esta data como referência para calcular datas FUTURAS de agendamentos!\n`;
+      systemPrompt += `=== FIM DATA ATUAL ===\n\n`;
+
+      console.log(`📅 [DATA] Data atual injetada no prompt: ${dataFormatada}`);
 
       // 👤 ADICIONAR INFORMAÇÃO SOBRE O NOME DO USUÁRIO
       const isFirstMessage = !context.conversationHistory || context.conversationHistory.length === 0;
@@ -550,6 +568,29 @@ export class AIService {
         console.log(`🔍 [PROPERTY_SEARCH] ⚠️ Verificação de histórico separado não executada. Condições: isPropertySearch=${isPropertySearch}, companyId=${!!instance?.companyId}, historyLength=${context.conversationHistory?.length || 0}`);
       }
 
+      // 🔄 NOVA LÓGICA: Detectar pedido de "ver mais" imóveis
+      // Se o usuário pedir "mais", "quero ver mais", "próximos", etc - forçar busca_imoveis
+      if (!isPropertySearch && instance?.companyId) {
+        const pedidoMaisKeywords = ['mais', 'quero ver mais', 'mostre mais', 'tem mais', 'próximos', 'proximos', 'outros', 'outras opções', 'outras opcoes'];
+        const ehPedidoMais = pedidoMaisKeywords.some(kw => messageLower.includes(kw));
+
+        // Verificar se no histórico já houve busca de imóveis (indicado por presença de "Encontrei" ou códigos de imóveis)
+        const historicoMencionaBusca = context.conversationHistory?.some(m =>
+          m.content.toLowerCase().includes('encontrei') ||
+          m.content.toLowerCase().includes('imóveis') ||
+          m.content.toLowerCase().includes('imoveis') ||
+          /[A-Z]\d{3,4}/.test(m.content) // Padrão de código de imóvel como A1001
+        );
+
+        console.log(`🔄 [VER_MAIS] ehPedidoMais: ${ehPedidoMais}`);
+        console.log(`🔄 [VER_MAIS] historicoMencionaBusca: ${historicoMencionaBusca}`);
+
+        if (ehPedidoMais && historicoMencionaBusca) {
+          isPropertySearch = true;
+          console.log(`🔄 [AI] ✅ Detectado pedido de VER MAIS imóveis - FORÇANDO FUNCTION CALLING`);
+        }
+      }
+
       console.log(`🔍 [PROPERTY_SEARCH] isPropertySearch FINAL: ${isPropertySearch}`);
       console.log(`🔍 [PROPERTY_SEARCH] ================================================`);
 
@@ -598,11 +639,19 @@ QUANDO você chamar a função busca_imoveis:
 
 EXEMPLOS CORRETOS:
 ✅ "Encontrei 5 apartamentos! Vou te mostrar:"
-✅ "Achei 12 imóveis! Mostrando os primeiros 5:"
+✅ "Achei 12 imóveis! Mostrando os primeiros 3:"
+✅ "Mais 3 imóveis para você! Veja:"
 
 EXEMPLOS ERRADOS:
 ❌ "Encontrei 5 apartamentos: 1. Apto Centro - 3 quartos..."
 ❌ "Veja esses imóveis: Apartamento tal, Casa tal..."
+
+🔄 QUANDO O USUÁRIO PEDIR MAIS IMÓVEIS:
+Quando o usuário digitar "mais", "quero ver mais", "mostre mais", "próximos", "outros":
+- Chame a função busca_imoveis NOVAMENTE com os MESMOS parâmetros anteriores
+- O sistema automaticamente calcula o offset e mostra os próximos 3 imóveis
+- Responda: "Mais opções para você! Veja:" (mensagem curta)
+- O sistema continuará mostrando de 3 em 3 até acabar
 
 🚨 FORÇAR FUNCTION CALL:
 Se o usuário mencionou QUALQUER tipo de imóvel E/OU cidade, você DEVE chamar a função busca_imoveis imediatamente!
@@ -611,23 +660,40 @@ SIMPLESMENTE CHAME A FUNÇÃO com os parâmetros que você conseguiu identificar
 
 Responda sempre em português brasileiro de forma natural e helpful.
 
-📅 REGRAS SOBRE AGENDAMENTO DE VISITAS:
-Quando o usuário demonstrar interesse em visitar um imóvel, você DEVE usar a função agendar_visita.
-Sinais de que o usuário quer agendar:
-- "Quero visitar", "posso visitar", "gostaria de conhecer"
-- "Quero agendar", "marcar visita", "marcar horário"
-- "Quando posso ir ver", "como faço para visitar"
-- "Tenho interesse", "quero ver pessoalmente"
+📅 REGRAS DE AGENDAMENTO DE VISITAS:
 
-Antes de chamar agendar_visita, você precisa ter:
-1. Nome do cliente (pode usar o nome do WhatsApp se disponível)
-2. Telefone (já temos do WhatsApp)
-3. Qual imóvel deseja visitar (código, nome ou descrição)
+FLUXO OBRIGATÓRIO (SIGA EXATAMENTE):
+1. Após mostrar os imóveis → PERGUNTE: "Qual imóvel você gostou mais? Vamos agendar uma visita sem compromisso?"
+2. Quando o usuário informar o CÓDIGO do imóvel → PERGUNTE o nome completo
+3. Quando o usuário informar o nome → PERGUNTE o telefone com DDD
+4. Quando o usuário informar o telefone → OFEREÇA 3 OPÇÕES DE HORÁRIO para visita
+5. SOMENTE quando tiver os 4 dados (código + nome + telefone + horário escolhido) → CHAME agendar_visita
 
-Se faltar alguma informação, pergunte ao usuário antes de agendar.
-Exemplo: "Para agendar sua visita, preciso confirmar seu nome completo. Como devo te chamar?"
+IMPORTANTE - OFERTA DE HORÁRIOS:
+- SEMPRE ofereça 3 opções de horários disponíveis para a visita
+- Use dias úteis (segunda a sexta) nos PRÓXIMOS 7 DIAS (datas FUTURAS, nunca a data de hoje)
+- Ofereça horários comerciais variados (manhã e tarde): 9h, 10h, 14h, 15h, 16h
+- CRÍTICO: Sempre inclua DIA, MÊS e ANO completos no formato "dia DD/MM/YYYY"
+- Formato OBRIGATÓRIO: "Tenho disponível: Quinta dia 02/01/2026 às 9h, Segunda dia 06/01/2026 às 14h, ou Quarta dia 08/01/2026 às 16h. Qual prefere?"
+- ATENÇÃO À VIRADA DE ANO: Se estamos em dezembro 2025, as datas de janeiro serão de 2026!
+- NUNCA ofereça a data de hoje - sempre datas FUTURAS
+- AGUARDE o usuário escolher o horário antes de chamar agendar_visita
+- Quando o usuário escolher, passe a data COMPLETA COM ANO no parâmetro data_visita (ex: "Sexta dia 02/01/2026 às 16h")
 
-Após criar o agendamento, informe que um corretor entrará em contato para confirmar o horário.\n\n`;
+IMPORTANTE - NÃO USE DADOS AUTOMÁTICOS:
+- NÃO use o pushName do WhatsApp como nome - PERGUNTE ao usuário
+- NÃO use o número do WhatsApp como telefone - PERGUNTE ao usuário
+- SEMPRE colete os dados PERGUNTANDO ao usuário
+
+Exemplo de fluxo correto:
+- Usuário: "A1004"
+- Agente: "Ótima escolha! Para agendar uma visita ao imóvel A1004, preciso de alguns dados. Qual é o seu nome completo?"
+- Usuário: "João Silva"
+- Agente: "Perfeito, João! Agora me informe seu telefone com DDD para contato."
+- Usuário: "47 99999-9999"
+- Agente: "Ótimo! Tenho disponível: Quinta dia 02/01/2026 às 9h, Segunda dia 06/01/2026 às 14h, ou Quarta dia 08/01/2026 às 16h. Qual horário você prefere?"
+- Usuário: "Quarta às 14h"
+- Agente: [AGORA SIM chama agendar_visita com data_visita="Quarta dia 08/01/2026 às 14h"]\n\n`;
       systemPrompt += `IMPORTANTE: SEMPRE siga o prompt e personalidade definidos no início desta mensagem. Não mude seu comportamento ou tom.`;
 
       // PRÉ-PROCESSAR: Detectar cidade e tipo no histórico para evitar loops
@@ -810,28 +876,32 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
           type: "function" as const,
           function: {
             name: "agendar_visita",
-            description: "Use esta função quando o usuário confirmar interesse em agendar uma visita a um imóvel. Coleta os dados do cliente (nome, telefone) e cria um agendamento. Chame esta função quando o usuário disser que quer visitar, agendar visita, conhecer o imóvel pessoalmente, marcar horário para ver o imóvel, etc.",
+            description: "ATENÇÃO: Só chame esta função quando tiver coletado TODOS os 4 dados na conversa: 1) Código do imóvel, 2) Nome completo do cliente (PERGUNTE se não souber), 3) Telefone com DDD (PERGUNTE se não souber), 4) Data/hora da visita ESCOLHIDA pelo cliente entre as opções oferecidas. Se faltar QUALQUER dado, NÃO chame a função - pergunte ao usuário primeiro!",
             parameters: {
               type: "object",
               properties: {
                 nome_cliente: {
                   type: "string",
-                  description: "Nome completo do cliente que deseja agendar a visita. Se já souber o nome do pushName ou histórico, use-o. Caso contrário, pergunte ao usuário."
+                  description: "Nome COMPLETO informado pelo cliente durante a conversa. Se não foi informado, PERGUNTE antes de chamar esta função."
                 },
                 telefone_cliente: {
                   type: "string",
-                  description: "Telefone do cliente para contato. Pode ser extraído do número do WhatsApp atual ou informado pelo usuário."
+                  description: "Telefone COM DDD informado pelo cliente. Se não foi informado, PERGUNTE antes de chamar esta função."
                 },
                 imovel_interesse: {
                   type: "string",
-                  description: "Descrição ou código do imóvel que o cliente deseja visitar. Pode ser o nome, código, endereço ou descrição do imóvel discutido na conversa."
+                  description: "Código do imóvel escolhido pelo cliente (ex: A1001, A1002)."
+                },
+                data_visita: {
+                  type: "string",
+                  description: "Data e hora da visita ESCOLHIDA pelo cliente. Formato OBRIGATÓRIO com DIA/MÊS/ANO: 'Segunda dia 06/01/2026 às 9h' ou 'Sexta dia 02/01/2026 às 16h'. SEMPRE inclua o ANO na data! ATENÇÃO na virada de ano: se estamos em dezembro 2025, janeiro será 2026. NUNCA use a data de hoje - apenas datas FUTURAS."
                 },
                 observacoes: {
                   type: "string",
-                  description: "Observações adicionais sobre o agendamento, preferências de horário, etc."
+                  description: "Observações adicionais."
                 }
               },
-              required: ["nome_cliente", "telefone_cliente", "imovel_interesse"]
+              required: ["nome_cliente", "telefone_cliente", "imovel_interesse", "data_visita"]
             }
           }
         }
@@ -1118,22 +1188,80 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
             });
             console.log(`📸 [FUNCTION_CALL] Total de imagens coletadas: ${allPropertyImages.length}`);
 
+            // Buscar comodidades da empresa para mapear IDs para nomes
+            let amenitiesMap: Record<string, string> = {};
+            try {
+              const companyAmenities = await storage.getAmenitiesByCompany(instanceForSearch.companyId);
+              amenitiesMap = companyAmenities.reduce((acc, a) => {
+                acc[a.id] = a.name;
+                return acc;
+              }, {} as Record<string, string>);
+              console.log(`✨ [FUNCTION_CALL] ${Object.keys(amenitiesMap).length} comodidades carregadas`);
+            } catch (e) {
+              console.log(`⚠️ [FUNCTION_CALL] Erro ao carregar comodidades: ${e}`);
+            }
+
             // Preparar dados estruturados dos imóveis para envio sequencial
-            const structuredProperties: PropertyData[] = properties.map(p => ({
-              code: p.code || 'SEM-CÓDIGO',
-              name: p.name || 'Imóvel sem nome',
-              endereco: `${p.street}, ${p.number} - ${p.neighborhood || ''}, ${p.city || ''} - ${p.state || ''}`,
-              description: `${p.name}\n📍 ${p.street}, ${p.number} - ${p.neighborhood || ''}, ${p.city || ''} - ${p.state || ''}\n🛏️ ${p.bedrooms} quartos | 🚿 ${p.bathrooms} banheiros | 🚗 ${p.parkingSpaces} vagas\n📐 ${p.privateArea}m²\n💰 ${p.transactionType === 'locacao' ? 'Aluguel' : 'Venda'}\n${p.description ? '\n' + p.description : ''}`,
-              images: (p.images || []).slice(0, 5) // Limitar a 5 imagens por imóvel
-            }));
+            const structuredProperties: PropertyData[] = properties.map(p => {
+              // Formatar valor do imóvel
+              const valorFormatado = p.price
+                ? Number(p.price).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+                : 'Valor sob consulta';
+              const tipoTransacao = p.transactionType === 'locacao' ? 'Aluguel' : 'Venda';
+
+              // Mapear IDs das comodidades para nomes
+              let comodidadesTexto = '';
+              if (p.amenities && Array.isArray(p.amenities) && p.amenities.length > 0) {
+                const nomesComodidades = p.amenities
+                  .map((id: string) => amenitiesMap[id])
+                  .filter((nome: string | undefined) => nome) // Filtrar undefined
+                  .join(', ');
+                if (nomesComodidades) {
+                  comodidadesTexto = `\n✨ ${nomesComodidades}`;
+                }
+              }
+
+              return {
+                code: p.code || 'SEM-CÓDIGO',
+                name: p.name || 'Imóvel sem nome',
+                endereco: `${p.street}, ${p.number} - ${p.neighborhood || ''}, ${p.city || ''} - ${p.state || ''}`,
+                description: `Código: ${p.code || 'N/A'}\n${p.name}\n📍 ${p.street}, ${p.number} - ${p.neighborhood || ''}, ${p.city || ''} - ${p.state || ''}\n🛏️ ${p.bedrooms} quartos | 🚿 ${p.bathrooms} banheiros | 🚗 ${p.parkingSpaces} vagas\n📐 ${p.privateArea}m²\n💰 ${tipoTransacao}: ${valorFormatado}${comodidadesTexto}\n${p.description ? '\n' + p.description : ''}`,
+                images: (p.images || []).slice(0, 5) // Limitar a 5 imagens por imóvel
+              };
+            });
 
             // Formatar resultado SIMPLIFICADO para o modelo
             // NÃO enviar detalhes dos imóveis, apenas estatísticas
             // Isso evita que o modelo liste os imóveis no texto da resposta
             const totalRestante = totalEncontrados - (offset + properties.length);
+
+            // Se o usuário pediu mais mas não há mais imóveis
+            if (properties.length === 0 && offset > 0) {
+              console.log(`🔄 [FUNCTION_CALL] Não há mais imóveis para mostrar (offset: ${offset})`);
+              return {
+                text: `Esses são todos os imóveis disponíveis! 🏠\n\nQual deles você mais gostou? Me diga o código (ex: A1001) que eu agendo uma visita sem compromisso para você conhecer de perto! 📅`
+              };
+            }
+
+            // Se não encontrou nenhum imóvel
+            if (properties.length === 0 && offset === 0) {
+              console.log(`❌ [FUNCTION_CALL] Nenhum imóvel encontrado com os filtros aplicados`);
+              return {
+                text: `Não encontrei imóveis com essas características no momento. 😔\n\nPosso ajudar você a buscar de outra forma? Tente mudar a cidade, o tipo de imóvel ou o tipo de transação.`
+              };
+            }
+
             const mensagemInicial = offset === 0
               ? `Encontrei ${totalEncontrados} imóveis. Mostrando os primeiros ${properties.length}.`
               : `Mostrando mais ${properties.length} imóveis.`;
+
+            // Incluir códigos dos imóveis mostrados para referência
+            const codigosImoveis = properties.map(p => p.code).join(', ');
+
+            // Mensagem diferente se não tem mais resultados
+            const instrucaoAgente = totalRestante > 0
+              ? `IMPORTANTE: O sistema enviará os imóveis automaticamente. Responda apenas com uma introdução curta como "Mais opções para você! Veja:"`
+              : `IMPORTANTE: Esses são TODOS os imóveis disponíveis. Após os imóveis serem exibidos, pergunte ao usuário qual código ele mais gostou para agendar uma visita.`;
 
             const functionResult = {
               total: totalEncontrados,
@@ -1142,7 +1270,9 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
               limite_aplicado: limite,
               tem_mais_resultados: totalRestante > 0,
               total_restante: totalRestante,
-              mensagem: `${mensagemInicial}${totalRestante > 0 ? ` Ainda há mais ${totalRestante} imóveis disponíveis. Peça "mostre mais" para ver os próximos 3.` : ''} O sistema enviará cada imóvel automaticamente com suas fotos.`
+              codigos_mostrados: codigosImoveis,
+              mensagem: `${mensagemInicial}${totalRestante > 0 ? ` Ainda há mais ${totalRestante} imóveis disponíveis. O usuário pode pedir "mais" para ver os próximos.` : ' Esses são todos os imóveis disponíveis.'} O sistema enviará cada imóvel automaticamente com suas fotos.`,
+              instrucao_agente: instrucaoAgente
             };
 
             // Adicionar a resposta da função ao contexto e fazer nova chamada
@@ -1154,26 +1284,37 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
               content: JSON.stringify(functionResult)
             });
 
+            // Adicionar instrução para resposta CURTA (a pergunta de agendamento será enviada automaticamente após os imóveis)
+            messages.push({
+              role: "system" as const,
+              content: `INSTRUÇÃO: Os imóveis com códigos [${codigosImoveis}] estão sendo enviados ao usuário com fotos. Sua resposta deve ser MUITO CURTA, apenas uma breve introdução (1-2 frases). NÃO inclua pergunta sobre agendamento - ela será enviada automaticamente após os imóveis. Exemplo: "Encontrei ótimas opções para você! Veja:"`
+            });
+
             console.log(`📚 [FUNCTION_CALL] Fazendo chamada final COM histórico completo (${messages.length} mensagens)`);
-            console.log(`📚 [FUNCTION_CALL] Composição: 1 system + ${context.conversationHistory?.length || 0} histórico + mensagem atual + tool_call + tool_result`);
+            console.log(`📚 [FUNCTION_CALL] Composição: 1 system + ${context.conversationHistory?.length || 0} histórico + mensagem atual + tool_call + tool_result + instrução agendamento`);
 
             // Fazer nova chamada para o modelo processar o resultado
             // Mantendo TODO o histórico para que o agente não perca memória
-            // max_tokens baixo para forçar resposta CURTA
+            // max_tokens baixo para forçar resposta curta (apenas introdução)
+            // IMPORTANTE: Passar as tools para que o modelo possa chamar agendar_visita se necessário
             const finalResponse = await openai.chat.completions.create({
               model: "gpt-4o",
-              messages: messages, // Inclui: system + histórico + mensagem atual + tool_call + tool_result
-              max_tokens: 100, // BAIXO para forçar resposta curta (apenas introdução)
-              temperature: 0.3, // BAIXO para ser mais determinístico
+              messages: messages, // Inclui: system + histórico + mensagem atual + tool_call + tool_result + instrução
+              max_tokens: 100, // Baixo para resposta curta (só introdução)
+              temperature: 0.5,
+              tools: tools, // Manter tools disponíveis para possível agendamento
+              tool_choice: "auto" // Deixar o modelo decidir se precisa chamar alguma tool
             });
 
             console.log(`✅ [FUNCTION_CALL] Resposta final gerada COM memória preservada`);
             console.log(`📦 [FUNCTION_CALL] Retornando ${structuredProperties.length} imóveis estruturados`);
+            console.log(`📦 [FUNCTION_CALL] Há mais imóveis disponíveis: ${totalRestante > 0}`);
 
             return {
               text: finalResponse.choices[0].message.content || "Encontrei os imóveis mas não consegui formatá-los.",
               propertyImages: allPropertyImages.length > 0 ? allPropertyImages : undefined, // deprecated
-              properties: structuredProperties.length > 0 ? structuredProperties : undefined
+              properties: structuredProperties.length > 0 ? structuredProperties : undefined,
+              hasMoreProperties: totalRestante > 0
             };
 
           } catch (error) {
@@ -1202,25 +1343,60 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
             const nomeCliente = functionArgs.nome_cliente || context.pushName || 'Cliente WhatsApp';
             const telefoneCliente = functionArgs.telefone_cliente || context.phone;
             const imovelInteresse = functionArgs.imovel_interesse || 'Imóvel não especificado';
+            const dataVisita = functionArgs.data_visita || 'Data a confirmar';
             const observacoes = functionArgs.observacoes || null;
 
             console.log(`📅 [AGENDAR_VISITA] Dados do agendamento:`);
             console.log(`   Nome: ${nomeCliente}`);
             console.log(`   Telefone: ${telefoneCliente}`);
             console.log(`   Imóvel: ${imovelInteresse}`);
+            console.log(`   Data da visita: ${dataVisita}`);
             console.log(`   Observações: ${observacoes || 'Nenhuma'}`);
 
-            // Buscar um corretor aleatório da empresa para atribuir o agendamento
+            // Buscar corretores da empresa para rodízio
             const brokers = await storage.getBrokersByCompany(instanceForAppointment.companyId);
             let brokerId: string | null = null;
             let brokerName: string | null = null;
 
             if (brokers.length > 0) {
-              // Selecionar corretor aleatório (distribuição simples)
-              const randomIndex = Math.floor(Math.random() * brokers.length);
-              brokerId = brokers[randomIndex].id;
-              brokerName = brokers[randomIndex].name;
-              console.log(`👤 [AGENDAR_VISITA] Corretor atribuído: ${brokerName} (ID: ${brokerId})`);
+              // ========== SISTEMA DE RODÍZIO DE CORRETORES ==========
+              // 1. Primeiro agendamento do dia: aleatório
+              // 2. Próximos agendamentos: próximo corretor na lista (circular)
+
+              console.log(`🔄 [RODÍZIO] Iniciando seleção de corretor em rodízio...`);
+              console.log(`🔄 [RODÍZIO] Total de corretores disponíveis: ${brokers.length}`);
+
+              // Ordenar corretores por ID para garantir ordem consistente
+              const sortedBrokers = [...brokers].sort((a, b) => a.id.localeCompare(b.id));
+
+              // Buscar último agendamento do dia que tem corretor
+              const lastAppointment = await storage.getLastAppointmentOfDayWithBroker(instanceForAppointment.companyId);
+
+              if (!lastAppointment || !lastAppointment.brokerId) {
+                // Primeiro agendamento do dia - selecionar aleatoriamente
+                const randomIndex = Math.floor(Math.random() * sortedBrokers.length);
+                brokerId = sortedBrokers[randomIndex].id;
+                brokerName = sortedBrokers[randomIndex].name;
+                console.log(`🎲 [RODÍZIO] Primeiro agendamento do dia - corretor aleatório: ${brokerName}`);
+              } else {
+                // Já houve agendamento hoje - pegar próximo corretor na lista (circular)
+                const lastBrokerIndex = sortedBrokers.findIndex(b => b.id === lastAppointment.brokerId);
+
+                if (lastBrokerIndex === -1) {
+                  // Corretor do último agendamento não existe mais, começar do início
+                  brokerId = sortedBrokers[0].id;
+                  brokerName = sortedBrokers[0].name;
+                  console.log(`⚠️ [RODÍZIO] Corretor anterior não encontrado - reiniciando: ${brokerName}`);
+                } else {
+                  // Próximo corretor (circular - volta ao início se chegar no fim)
+                  const nextIndex = (lastBrokerIndex + 1) % sortedBrokers.length;
+                  brokerId = sortedBrokers[nextIndex].id;
+                  brokerName = sortedBrokers[nextIndex].name;
+                  console.log(`🔄 [RODÍZIO] Próximo corretor na lista (${lastBrokerIndex + 1} → ${nextIndex + 1}): ${brokerName}`);
+                }
+              }
+
+              console.log(`👤 [AGENDAR_VISITA] Corretor atribuído por rodízio: ${brokerName} (ID: ${brokerId})`);
             } else {
               console.log(`⚠️ [AGENDAR_VISITA] Nenhum corretor cadastrado - agendamento sem corretor`);
             }
@@ -1238,7 +1414,37 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
               console.log(`⚠️ [AGENDAR_VISITA] Não foi possível obter conversationId`);
             }
 
-            // Criar o agendamento
+            // Criar o agendamento com a data da visita nas observações
+            const notesComData = dataVisita !== 'Data a confirmar'
+              ? `Visita agendada para: ${dataVisita}${observacoes ? ` | ${observacoes}` : ''}`
+              : observacoes;
+
+            // Parsear a data da visita para salvar no scheduledDate
+            // Formato esperado: "Segunda-feira dia 05/01/2026 às 9h" ou "Sexta dia 02/01/2026 às 16h"
+            let scheduledDateParsed: Date | null = null;
+            if (dataVisita && dataVisita !== 'Data a confirmar') {
+              try {
+                // Extrair dia/mês/ano e hora do texto
+                const regexData = /(\d{1,2})\/(\d{1,2})\/(\d{4})/;
+                const regexHora = /(\d{1,2})h/;
+
+                const matchData = dataVisita.match(regexData);
+                const matchHora = dataVisita.match(regexHora);
+
+                if (matchData) {
+                  const dia = parseInt(matchData[1]);
+                  const mes = parseInt(matchData[2]) - 1; // Mês em JS é 0-indexed
+                  const ano = parseInt(matchData[3]);
+                  const hora = matchHora ? parseInt(matchHora[1]) : 9; // Default 9h
+
+                  scheduledDateParsed = new Date(ano, mes, dia, hora, 0, 0);
+                  console.log(`📅 [AGENDAR_VISITA] Data parseada: ${scheduledDateParsed.toISOString()}`);
+                }
+              } catch (parseError) {
+                console.log(`⚠️ [AGENDAR_VISITA] Erro ao parsear data: ${parseError}`);
+              }
+            }
+
             const newAppointment = await storage.createAppointment({
               companyId: instanceForAppointment.companyId,
               brokerId: brokerId,
@@ -1246,14 +1452,132 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
               clientName: nomeCliente,
               clientPhone: telefoneCliente,
               propertyInterest: imovelInteresse,
-              scheduledDate: null, // Será definido posteriormente
-              status: 'pendente',
-              notes: observacoes,
+              scheduledDate: scheduledDateParsed,
+              status: 'confirmado', // Status confirmado pois o usuário escolheu o horário
+              notes: notesComData,
               source: 'whatsapp',
               conversationId: conversationId
             });
 
             console.log(`✅ [AGENDAR_VISITA] Agendamento criado com sucesso! ID: ${newAppointment.id}`);
+
+            // ========== NOTIFICAÇÃO AO CORRETOR VIA WHATSAPP ==========
+            console.log(`📲 [NOTIFICAÇÃO] Verificando se deve enviar notificação...`);
+            console.log(`📲 [NOTIFICAÇÃO] brokerId: ${brokerId}`);
+            console.log(`📲 [NOTIFICAÇÃO] brokerName: ${brokerName}`);
+
+            if (brokerId) {
+              try {
+                console.log(`📲 [NOTIFICAÇÃO] Iniciando notificação ao corretor...`);
+
+                // Buscar dados do corretor
+                const broker = await storage.getBroker(brokerId);
+                console.log(`📲 [NOTIFICAÇÃO] Corretor encontrado no DB:`, broker ? `${broker.name} (WhatsApp: ${broker.whatsapp || 'NÃO CADASTRADO'})` : 'NÃO ENCONTRADO');
+
+                if (broker?.whatsapp) {
+                  console.log(`📲 [NOTIFICAÇÃO] Corretor: ${broker.name}, WhatsApp: ${broker.whatsapp}`);
+
+                  // Buscar dados do imóvel pelo código (extrair código do texto de interesse)
+                  let propertyInfo = {
+                    code: imovelInteresse,
+                    transactionType: '-',
+                    propertyType: '-',
+                    city: '-'
+                  };
+
+                  // Tentar extrair código do imóvel (formato: A1001, IMV001, etc.)
+                  const codigoMatch = imovelInteresse.match(/[A-Za-z]*\d+/);
+                  if (codigoMatch) {
+                    const codigoImovel = codigoMatch[0].toUpperCase();
+                    console.log(`🔍 [NOTIFICAÇÃO] Buscando imóvel pelo código: ${codigoImovel}`);
+
+                    const property = await storage.getPropertyByCode(codigoImovel, instanceForAppointment.companyId);
+
+                    if (property) {
+                      console.log(`✅ [NOTIFICAÇÃO] Imóvel encontrado: ${property.name}`);
+                      propertyInfo = {
+                        code: property.code,
+                        transactionType: property.transactionType === 'locacao' ? 'Locação' : 'Venda',
+                        propertyType: property.propertyType || '-',
+                        city: property.city || '-'
+                      };
+                    } else {
+                      console.log(`⚠️ [NOTIFICAÇÃO] Imóvel não encontrado pelo código`);
+                    }
+                  }
+
+                  // Formatar número do cliente para link do WhatsApp (com código do país 55)
+                  let clientPhoneClean = telefoneCliente.replace(/\D/g, '');
+                  let whatsappLink = '';
+
+                  // Validar se é um número de telefone válido (não LID do WhatsApp)
+                  // Números brasileiros válidos: 10-11 dígitos (sem 55) ou 12-13 dígitos (com 55)
+                  const isValidBrazilianPhone = (
+                    (clientPhoneClean.length >= 10 && clientPhoneClean.length <= 11) || // Sem código do país
+                    (clientPhoneClean.length >= 12 && clientPhoneClean.length <= 13 && clientPhoneClean.startsWith('55')) // Com código do país
+                  );
+
+                  if (isValidBrazilianPhone) {
+                    // Adicionar código do país 55 se não tiver
+                    if (!clientPhoneClean.startsWith('55')) {
+                      clientPhoneClean = '55' + clientPhoneClean;
+                    }
+                    whatsappLink = `https://wa.me/${clientPhoneClean}`;
+                  } else {
+                    // Número inválido (provavelmente LID do WhatsApp) - não gerar link
+                    console.log(`⚠️ [NOTIFICAÇÃO] Número de telefone inválido para link WhatsApp: ${clientPhoneClean} (${clientPhoneClean.length} dígitos)`);
+                    whatsappLink = `(Número não disponível para link direto)`;
+                  }
+
+                  // Montar mensagem para o corretor
+                  const mensagemCorretor = `🏠 *NOVO AGENDAMENTO DE VISITA*
+
+👤 *Cliente:* ${nomeCliente}
+📱 *Telefone:* ${telefoneCliente}
+
+🏢 *Imóvel:* ${propertyInfo.code}
+📋 *Tipo:* ${propertyInfo.propertyType}
+💼 *Transação:* ${propertyInfo.transactionType}
+📍 *Cidade:* ${propertyInfo.city}
+
+📅 *Data da visita:* ${dataVisita}
+
+👉 *Clique para falar com o cliente:*
+${whatsappLink}`;
+
+                  // Buscar configuração da Evolution API
+                  const evolutionConfig = await storage.getEvolutionApiConfiguration();
+
+                  if (evolutionConfig?.evolutionURL && evolutionConfig?.evolutionToken) {
+                    const evolutionApi = new EvolutionApiService({
+                      baseURL: evolutionConfig.evolutionURL,
+                      token: evolutionConfig.evolutionToken
+                    });
+
+                    // Formatar número do corretor
+                    const brokerPhoneClean = broker.whatsapp.replace(/\D/g, '');
+
+                    // Usar a mesma instância do WhatsApp para enviar
+                    const instanceName = instanceForAppointment.evolutionId || instanceForAppointment.name;
+
+                    console.log(`📤 [NOTIFICAÇÃO] Enviando mensagem para corretor ${broker.name} (${brokerPhoneClean}) via instância ${instanceName}`);
+
+                    await evolutionApi.sendMessage(instanceName, brokerPhoneClean, mensagemCorretor);
+
+                    console.log(`✅ [NOTIFICAÇÃO] Mensagem enviada com sucesso ao corretor!`);
+                  } else {
+                    console.log(`⚠️ [NOTIFICAÇÃO] Evolution API não configurada - notificação não enviada`);
+                  }
+                } else {
+                  console.log(`⚠️ [NOTIFICAÇÃO] Corretor não tem WhatsApp cadastrado`);
+                }
+              } catch (notificationError) {
+                console.error(`❌ [NOTIFICAÇÃO] Erro ao enviar notificação ao corretor:`, notificationError);
+                // Não interromper o fluxo se a notificação falhar
+              }
+            } else {
+              console.log(`⚠️ [NOTIFICAÇÃO] Nenhum corretor atribuído ao agendamento - notificação não enviada`);
+            }
 
             // Preparar resultado para o modelo
             const appointmentResult = {
@@ -1262,11 +1586,12 @@ Após criar o agendamento, informe que um corretor entrará em contato para conf
               nome_cliente: nomeCliente,
               telefone: telefoneCliente,
               imovel: imovelInteresse,
+              data_visita: dataVisita,
               corretor: brokerName || 'A definir',
-              status: 'pendente',
+              status: 'confirmado',
               mensagem: brokerName
-                ? `Agendamento criado com sucesso! O corretor ${brokerName} entrará em contato para confirmar o melhor horário para a visita.`
-                : `Agendamento criado com sucesso! Nossa equipe entrará em contato para confirmar o melhor horário para a visita.`
+                ? `Perfeito! Sua visita ao imóvel ${imovelInteresse} está agendada para ${dataVisita}. O corretor ${brokerName} estará aguardando você no local. Até lá!`
+                : `Perfeito! Sua visita ao imóvel ${imovelInteresse} está agendada para ${dataVisita}. Nossa equipe estará aguardando você no local. Até lá!`
             };
 
             // Adicionar resposta da função e fazer nova chamada

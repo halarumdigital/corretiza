@@ -255,6 +255,7 @@ export const properties = mysqlTable("properties", {
   youtubeVideoUrl: varchar("youtube_video_url", { length: 500 }),
   amenities: json("amenities").default([]), // Array of amenity IDs
   featured: boolean("featured").default(false), // Se é propriedade em destaque no website
+  price: decimal("price", { precision: 12, scale: 2 }), // Valor do imóvel (ex: 1450.00)
   createdAt: timestamp("created_at").defaultNow(),
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
@@ -559,12 +560,11 @@ export const insertPropertySchema = createInsertSchema(properties).pick({
   mapLocation: true,
   transactionType: true,
   status: true,
-  hasServiceArea: true,
-  hasSocialBathroom: true,
-  hasTvRoom: true,
   images: true,
   youtubeVideoUrl: true,
+  amenities: true,
   featured: true,
+  price: true,
 }).extend({
   propertyType: z.string().nullable().optional(),
   proximity: z.string().nullable().optional(),
@@ -579,6 +579,7 @@ export const insertPropertySchema = createInsertSchema(properties).pick({
   parkingSpaces: z.union([z.string(), z.number()]).transform(val => typeof val === 'number' ? Number(val) : Number(val)),
   bathrooms: z.union([z.string(), z.number()]).transform(val => typeof val === 'number' ? Number(val) : Number(val)),
   bedrooms: z.union([z.string(), z.number()]).transform(val => typeof val === 'number' ? Number(val) : Number(val)),
+  price: z.union([z.string(), z.number()]).nullable().optional().transform(val => val != null ? (typeof val === 'number' ? val.toString() : val) : null),
 });
 
 export const insertAmenitySchema = createInsertSchema(amenities).pick({
