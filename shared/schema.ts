@@ -5,6 +5,7 @@ import { z } from "zod";
 
 export const users = mysqlTable("users", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
+  name: varchar("name", { length: 255 }),
   email: varchar("email", { length: 255 }).notNull().unique(),
   password: text("password").notNull(),
   role: varchar("role", { length: 20 }).notNull().default("client"), // 'admin' | 'client'
@@ -371,6 +372,7 @@ export const appointments = mysqlTable("appointments", {
 
 // Insert schemas
 export const insertUserSchema = createInsertSchema(users).pick({
+  name: true,
   email: true,
   password: true,
   role: true,

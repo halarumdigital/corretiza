@@ -18,6 +18,7 @@ import AiSettings from "@/pages/admin/ai-settings";
 import Companies from "@/pages/admin/companies";
 import CustomDomains from "@/pages/admin/custom-domains";
 import Plans from "@/pages/admin/plans";
+import AdminUsers from "@/pages/admin/users";
 
 // Client pages
 import ClientDashboard from "@/pages/client/dashboard";
@@ -148,6 +149,14 @@ function Router() {
           requiredRole="admin"
           title="Planos"
           subtitle="Gerenciamento de planos"
+        />
+      </Route>
+      <Route path="/admin/users">
+        <ProtectedRoute
+          component={AdminUsers}
+          requiredRole="admin"
+          title="Usuários"
+          subtitle="Gerenciamento de usuários administrativos"
         />
       </Route>
 

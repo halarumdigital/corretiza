@@ -18,9 +18,11 @@ export interface IStorage {
   // Users
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
+  getAllAdminUsers(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User>;
-  
+  deleteUser(id: string): Promise<void>;
+
   // Companies
   getCompany(id: string): Promise<Company | undefined>;
   getCompaniesByUserId(userId: string): Promise<Company[]>;
@@ -597,11 +599,11 @@ export class MySQLStorage implements IStorage {
 
   async createUser(user: InsertUser): Promise<User> {
     if (!this.connection) throw new Error('No database connection');
-    
+
     const id = randomUUID();
     await this.connection.execute(
-      'INSERT INTO users (id, email, password, role, company_id) VALUES (?, ?, ?, ?, ?)',
-      [id, user.email, user.password, user.role || 'client', user.companyId || null]
+      'INSERT INTO users (id, name, email, password, role, company_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [id, user.name || null, user.email, user.password, user.role || 'client', user.companyId || null]
     );
     return this.getUser(id) as Promise<User>;
   }
@@ -621,6 +623,28 @@ export class MySQLStorage implements IStorage {
     }
     
     return this.getUser(id) as Promise<User>;
+  }
+
+  async getAllAdminUsers(): Promise<User[]> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT id, name, email, role, company_id as companyId, created_at as createdAt, updated_at as updatedAt FROM users WHERE role = ? ORDER BY created_at DESC',
+      ['admin']
+    );
+    return (rows as any[]).map(row => ({
+      ...row,
+      password: '', // Never return password
+    }));
+  }
+
+  async deleteUser(id: string): Promise<void> {
+    if (!this.connection) throw new Error('No database connection');
+
+    await this.connection.execute(
+      'DELETE FROM users WHERE id = ?',
+      [id]
+    );
   }
 
   // Company methods

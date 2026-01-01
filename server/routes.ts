@@ -656,6 +656,107 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Admin Users - Gerenciamento de usuários administrativos
+  app.get("/api/admin/users", authenticate, requireAdmin, async (req, res) => {
+    try {
+      const users = await storage.getAllAdminUsers();
+      res.json(users);
+    } catch (error) {
+      console.error("Get admin users error:", error);
+      res.status(500).json({ error: "Erro ao buscar usuários administrativos" });
+    }
+  });
+
+  app.post("/api/admin/users", authenticate, requireAdmin, async (req, res) => {
+    try {
+      const { name, email, password, role } = req.body;
+
+      if (!email || !password) {
+        return res.status(400).json({ error: "Email e senha são obrigatórios" });
+      }
+
+      // Check if user already exists
+      const existingUser = await storage.getUserByEmail(email);
+      if (existingUser) {
+        return res.status(400).json({ error: "Já existe um usuário com este email" });
+      }
+
+      const hashedPassword = await hashPassword(password);
+      const user = await storage.createUser({
+        name: name || null,
+        email,
+        password: hashedPassword,
+        role: role || 'admin',
+      });
+
+      // Return without password
+      const { password: _, ...userWithoutPassword } = user;
+      res.status(201).json(userWithoutPassword);
+    } catch (error) {
+      console.error("Create admin user error:", error);
+      res.status(500).json({ error: "Erro ao criar usuário administrativo" });
+    }
+  });
+
+  app.put("/api/admin/users/:id", authenticate, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+      const { name, email, password, role } = req.body;
+
+      // Check if user exists
+      const existingUser = await storage.getUser(id);
+      if (!existingUser) {
+        return res.status(404).json({ error: "Usuário não encontrado" });
+      }
+
+      // If changing email, check for duplicates
+      if (email && email !== existingUser.email) {
+        const emailExists = await storage.getUserByEmail(email);
+        if (emailExists) {
+          return res.status(400).json({ error: "Já existe um usuário com este email" });
+        }
+      }
+
+      const updates: any = {};
+      if (name !== undefined) updates.name = name;
+      if (email) updates.email = email;
+      if (role) updates.role = role;
+      if (password) updates.password = await hashPassword(password);
+
+      const updatedUser = await storage.updateUser(id, updates);
+
+      // Return without password
+      const { password: _, ...userWithoutPassword } = updatedUser;
+      res.json(userWithoutPassword);
+    } catch (error) {
+      console.error("Update admin user error:", error);
+      res.status(500).json({ error: "Erro ao atualizar usuário administrativo" });
+    }
+  });
+
+  app.delete("/api/admin/users/:id", authenticate, requireAdmin, async (req: AuthRequest, res) => {
+    try {
+      const { id } = req.params;
+
+      // Prevent deleting yourself
+      if (req.user?.id === id) {
+        return res.status(400).json({ error: "Você não pode excluir seu próprio usuário" });
+      }
+
+      // Check if user exists
+      const existingUser = await storage.getUser(id);
+      if (!existingUser) {
+        return res.status(404).json({ error: "Usuário não encontrado" });
+      }
+
+      await storage.deleteUser(id);
+      res.status(204).send();
+    } catch (error) {
+      console.error("Delete admin user error:", error);
+      res.status(500).json({ error: "Erro ao excluir usuário administrativo" });
+    }
+  });
+
   // Brokers (Corretores) - Client routes
   app.get("/api/brokers", authenticate, requireClient, async (req: AuthRequest, res) => {
     try {

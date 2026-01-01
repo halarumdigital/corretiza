@@ -26,6 +26,7 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/evolution-api", label: "Evolution API", icon: <Waypoints className="w-5 h-5" /> },
   { href: "/admin/ai-settings", label: "IA Global", icon: <Bot className="w-5 h-5" /> },
   { href: "/admin/companies", label: "Empresas", icon: <Building className="w-5 h-5" /> },
+  { href: "/admin/users", label: "Usuários", icon: <Users className="w-5 h-5" /> },
   { href: "/admin/plans", label: "Planos", icon: <CreditCard className="w-5 h-5" /> },
   { href: "/admin/custom-domains", label: "Domínios Customizados", icon: <Globe className="w-5 h-5" /> },
 ];
