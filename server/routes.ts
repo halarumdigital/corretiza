@@ -3636,6 +3636,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
       const leads = await storage.getLeadsByCompany(companyId);
       const appointments = await storage.getAppointmentsByCompany(companyId);
 
+      // DEBUG: Log appointments
+      console.log(`📅 [STATS DEBUG] Total appointments no banco: ${appointments.length}`);
+      if (appointments.length > 0) {
+        console.log(`📅 [STATS DEBUG] Primeiro appointment:`, JSON.stringify(appointments[0], null, 2));
+      }
+
       // Parse date range from query parameters
       const { startDate, endDate } = req.query as { startDate?: string; endDate?: string };
 
@@ -3731,17 +3737,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
       }).length;
 
       // Agendamentos do período selecionado e período anterior
+      // Usar scheduledDate (data da visita) OU createdAt (data de criação) se scheduledDate não existir
       const appointmentsPeriod = appointments.filter(a => {
-        if (!a.createdAt) return false;
-        const createdAt = new Date(a.createdAt);
-        return createdAt >= periodStart && createdAt <= periodEnd;
+        const dateToCheck = a.scheduledDate || a.createdAt;
+        if (!dateToCheck) return false;
+        const appointmentDate = new Date(dateToCheck);
+        return appointmentDate >= periodStart && appointmentDate <= periodEnd;
       }).length;
 
       const appointmentsPrevPeriod = appointments.filter(a => {
-        if (!a.createdAt) return false;
-        const createdAt = new Date(a.createdAt);
-        return createdAt >= prevPeriodStart && createdAt <= prevPeriodEnd;
+        const dateToCheck = a.scheduledDate || a.createdAt;
+        if (!dateToCheck) return false;
+        const appointmentDate = new Date(dateToCheck);
+        return appointmentDate >= prevPeriodStart && appointmentDate <= prevPeriodEnd;
       }).length;
+
+      console.log(`📅 [STATS DEBUG] Agendamentos no período: ${appointmentsPeriod}, período anterior: ${appointmentsPrevPeriod}`);
 
       // Calcular variação percentual
       const calcChange = (current: number, previous: number): number => {
@@ -3868,10 +3879,12 @@ export async function registerRoutes(app: Express): Promise<Server> {
         .map((item, index) => ({ rank: index + 1, name: item.name, value: item.value }));
 
       // Agregar agendamentos por dia no período
+      // Usar scheduledDate (data da visita) OU createdAt (data de criação) se scheduledDate não existir
       const appointmentsInPeriod = allAppointments.filter(apt => {
-        if (!apt.createdAt) return false;
-        const createdAt = new Date(apt.createdAt);
-        return createdAt >= periodStart && createdAt <= periodEnd;
+        const dateToCheck = apt.scheduledDate || apt.createdAt;
+        if (!dateToCheck) return false;
+        const appointmentDate = new Date(dateToCheck);
+        return appointmentDate >= periodStart && appointmentDate <= periodEnd;
       });
 
       // Criar mapa de agendamentos por dia
@@ -3887,8 +3900,9 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       // Contar agendamentos por dia
       appointmentsInPeriod.forEach(apt => {
-        if (apt.createdAt) {
-          const dayKey = new Date(apt.createdAt).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
+        const dateToCheck = apt.scheduledDate || apt.createdAt;
+        if (dateToCheck) {
+          const dayKey = new Date(dateToCheck).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
           if (appointmentsByDay[dayKey] !== undefined) {
             appointmentsByDay[dayKey]++;
           }
