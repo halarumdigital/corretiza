@@ -2914,11 +2914,25 @@ export async function registerRoutes(app: Express): Promise<Server> {
 
       console.log(`⏱️ [WEBHOOK-${requestId}] Starting message processing...`);
       const { whatsappWebhookService } = await import("./services/whatsappWebhook");
-      await whatsappWebhookService.handleEvolutionMessage(req.body);
+      const { messageAggregatorService } = await import("./services/messageAggregator");
+
+      // Usar o agregador de mensagens para aguardar 15 segundos e combinar mensagens sequenciais
+      const wasAggregated = await messageAggregatorService.addMessage(
+        req.body,
+        async (aggregatedData) => {
+          console.log(`🔄 [WEBHOOK-${requestId}] Processing aggregated message...`);
+          await whatsappWebhookService.handleEvolutionMessage(aggregatedData);
+        }
+      );
 
       const processingTime = Date.now() - startTime;
-      console.log(`✅ [WEBHOOK-${requestId}] Message processed successfully in ${processingTime}ms`);
-      res.status(200).json({ success: true, processed: true, requestId, processingTime });
+      if (wasAggregated) {
+        console.log(`⏳ [WEBHOOK-${requestId}] Message added to aggregation buffer, waiting for more messages...`);
+        res.status(200).json({ success: true, processed: false, aggregated: true, requestId, processingTime });
+      } else {
+        console.log(`✅ [WEBHOOK-${requestId}] Message processed immediately in ${processingTime}ms`);
+        res.status(200).json({ success: true, processed: true, requestId, processingTime });
+      }
     } catch (error) {
       const processingTime = Date.now() - startTime;
       console.error(`❌ [WEBHOOK-${requestId}] CRITICAL ERROR after ${processingTime}ms:`, error);
@@ -2978,14 +2992,22 @@ export async function registerRoutes(app: Express): Promise<Server> {
         console.log(`🆔 [MESSAGES-UPSERT] Mensagem registrada no cache: ${messageIdUpsert}`);
       }
 
-      // Redirecionar para o processamento principal
-      await whatsappWebhookService.handleEvolutionMessage(req.body);
-      
-      res.status(200).json({ 
-        success: true, 
-        processed: true, 
-        type: "messages_upsert", 
-        timestamp: new Date().toISOString() 
+      // Usar o agregador de mensagens para aguardar 15 segundos e combinar mensagens sequenciais
+      const { messageAggregatorService } = await import("./services/messageAggregator");
+      const wasAggregated = await messageAggregatorService.addMessage(
+        req.body,
+        async (aggregatedData) => {
+          console.log(`🔄 [MESSAGES-UPSERT] Processing aggregated message...`);
+          await whatsappWebhookService.handleEvolutionMessage(aggregatedData);
+        }
+      );
+
+      res.status(200).json({
+        success: true,
+        processed: !wasAggregated,
+        aggregated: wasAggregated,
+        type: "messages_upsert",
+        timestamp: new Date().toISOString()
       });
     } catch (error) {
       console.error("❌ Error in messages-upsert webhook:", error);
