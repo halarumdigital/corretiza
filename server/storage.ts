@@ -17,6 +17,7 @@ export interface IStorage {
   getUser(id: string): Promise<User | undefined>;
   getUserByEmail(email: string): Promise<User | undefined>;
   getAllAdminUsers(): Promise<User[]>;
+  getAdminUsersWithPassword(): Promise<User[]>;
   createUser(user: InsertUser): Promise<User>;
   updateUser(id: string, updates: Partial<User>): Promise<User>;
   deleteUser(id: string): Promise<void>;
@@ -598,6 +599,16 @@ export class MySQLStorage implements IStorage {
       ...row,
       password: '', // Never return password
     }));
+  }
+
+  async getAdminUsersWithPassword(): Promise<User[]> {
+    if (!this.connection) throw new Error('No database connection');
+
+    const [rows] = await this.connection.execute(
+      'SELECT id, name, email, password, role, company_id as companyId, created_at as createdAt, updated_at as updatedAt FROM users WHERE role = ? ORDER BY created_at DESC',
+      ['admin']
+    );
+    return rows as User[];
   }
 
   async deleteUser(id: string): Promise<void> {

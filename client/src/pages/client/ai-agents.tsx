@@ -1,8 +1,8 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useQuery, useMutation } from "@tanstack/react-query";
 import { format } from "date-fns";
 import { ptBR } from "date-fns/locale";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -15,7 +15,7 @@ import { queryClient } from "@/lib/queryClient";
 import { apiGet, apiPost, apiPut, apiDelete } from "@/lib/api";
 import { AiAgent, WhatsappInstance } from "@/types";
 import { ObjectUploader } from "@/components/ObjectUploader";
-import { Bot, Plus, Edit, Trash2, FileText, Upload, TestTube2, Send, BarChart3, MessageCircle, User, RefreshCw } from "lucide-react";
+import { Bot, Plus, Edit, Trash2, FileText, Upload, TestTube2, Send, BarChart3, MessageCircle, User, RefreshCw, Lock, ShieldCheck } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 
 // Component for Agent Usage History
@@ -176,6 +176,110 @@ function AgentUsageHistory() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+// Admin Password Protection Component
+function AdminPasswordGate({ children }: { children: React.ReactNode }) {
+  const { toast } = useToast();
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [password, setPassword] = useState("");
+  const [isLoading, setIsLoading] = useState(false);
+
+  // Check if already authenticated in this session
+  useEffect(() => {
+    const authStatus = sessionStorage.getItem("ai_agents_auth");
+    if (authStatus === "true") {
+      setIsAuthenticated(true);
+    }
+  }, []);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setIsLoading(true);
+
+    try {
+      const response = await apiPost("/auth/verify-admin-password", { password });
+
+      if (response.valid) {
+        setIsAuthenticated(true);
+        sessionStorage.setItem("ai_agents_auth", "true");
+        toast({
+          title: "Acesso liberado",
+          description: "Senha de administrador verificada com sucesso!",
+        });
+      } else {
+        // Password incorrect but request succeeded
+        toast({
+          title: "Acesso negado",
+          description: response.error || "Senha incorreta. Tente novamente.",
+          variant: "destructive",
+        });
+        setPassword("");
+      }
+    } catch (error: any) {
+      toast({
+        title: "Erro",
+        description: error.message || "Erro ao verificar senha. Tente novamente.",
+        variant: "destructive",
+      });
+      setPassword("");
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  if (isAuthenticated) {
+    return <>{children}</>;
+  }
+
+  return (
+    <div className="flex items-center justify-center min-h-[60vh]">
+      <Card className="w-full max-w-md">
+        <CardHeader className="text-center">
+          <div className="mx-auto w-16 h-16 bg-amber-100 dark:bg-amber-900/30 rounded-full flex items-center justify-center mb-4">
+            <Lock className="w-8 h-8 text-amber-600 dark:text-amber-400" />
+          </div>
+          <CardTitle>Area Protegida</CardTitle>
+          <CardDescription>
+            Esta area requer autenticacao adicional. Digite a senha do administrador para continuar.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleSubmit} className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="admin-password">Senha do Administrador</Label>
+              <Input
+                id="admin-password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                placeholder="Digite a senha do admin"
+                required
+                autoFocus
+              />
+            </div>
+            <Button
+              type="submit"
+              className="w-full"
+              disabled={isLoading || !password}
+            >
+              {isLoading ? (
+                <>
+                  <RefreshCw className="w-4 h-4 mr-2 animate-spin" />
+                  Verificando...
+                </>
+              ) : (
+                <>
+                  <ShieldCheck className="w-4 h-4 mr-2" />
+                  Verificar e Acessar
+                </>
+              )}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -522,19 +626,20 @@ export default function AiAgents() {
   }
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between">
-        <div>
-          <CardTitle>Agentes de IA</CardTitle>
-          <p className="text-sm text-muted-foreground mt-1">
-            Crie e gerencie agentes de IA personalizados
-          </p>
-        </div>
-        <Button onClick={() => { resetForm(); setActiveTab("create"); }}>
-          <Plus className="w-4 h-4 mr-2" />
-          Novo Agente
-        </Button>
-      </CardHeader>
+    <AdminPasswordGate>
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between">
+          <div>
+            <CardTitle>Agentes de IA</CardTitle>
+            <p className="text-sm text-muted-foreground mt-1">
+              Crie e gerencie agentes de IA personalizados
+            </p>
+          </div>
+          <Button onClick={() => { resetForm(); setActiveTab("create"); }}>
+            <Plus className="w-4 h-4 mr-2" />
+            Novo Agente
+          </Button>
+        </CardHeader>
 
       <CardContent>
         <Tabs value={activeTab} onValueChange={setActiveTab}>
@@ -1191,5 +1296,6 @@ export default function AiAgents() {
         </Tabs>
       </CardContent>
     </Card>
+    </AdminPasswordGate>
   );
 }

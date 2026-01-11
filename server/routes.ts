@@ -169,6 +169,37 @@ export async function registerRoutes(app: Express): Promise<Server> {
     }
   });
 
+  // Verify admin password for protected areas
+  app.post("/api/auth/verify-admin-password", authenticate, requireClient, async (req: AuthRequest, res) => {
+    try {
+      const { password } = req.body;
+
+      if (!password) {
+        return res.status(400).json({ error: "Senha é obrigatória" });
+      }
+
+      // Get admin users with password for verification
+      const admins = await storage.getAdminUsersWithPassword();
+      if (!admins || admins.length === 0) {
+        return res.status(404).json({ error: "Nenhum administrador encontrado" });
+      }
+
+      // Check password against any admin
+      for (const admin of admins) {
+        const isValidPassword = await comparePassword(password, admin.password);
+        if (isValidPassword) {
+          return res.json({ valid: true });
+        }
+      }
+
+      // Return 200 with valid: false to avoid triggering logout on frontend
+      return res.json({ valid: false, error: "Senha incorreta" });
+    } catch (error) {
+      console.error("Verify admin password error:", error);
+      res.status(500).json({ error: "Erro interno do servidor" });
+    }
+  });
+
   app.post("/api/auth/register", async (req, res) => {
     try {
       const userData = insertUserSchema.parse(req.body);
