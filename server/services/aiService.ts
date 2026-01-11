@@ -417,7 +417,35 @@ export class AIService {
       systemPrompt += `IMPORTANTE: Use esta data como referência para calcular datas FUTURAS de agendamentos!\n`;
       systemPrompt += `=== FIM DATA ATUAL ===\n\n`;
 
+      // 📅 GERAR 3 DATAS ÚTEIS FUTURAS PARA EXEMPLO DE AGENDAMENTO
+      const gerarProximasDatasUteis = (quantidade: number): string[] => {
+        const datas: string[] = [];
+        const diasSemanaAbrev = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+        const horarios = ['9h', '14h', '16h'];
+        let dataAtual = new Date(hoje);
+
+        while (datas.length < quantidade) {
+          dataAtual.setDate(dataAtual.getDate() + 1); // Avançar um dia
+          const diaSemana = dataAtual.getDay();
+
+          // Apenas dias úteis (1=segunda a 5=sexta)
+          if (diaSemana >= 1 && diaSemana <= 5) {
+            const diaFormatado = dataAtual.getDate().toString().padStart(2, '0');
+            const mesFormatado = (dataAtual.getMonth() + 1).toString().padStart(2, '0');
+            const anoFormatado = dataAtual.getFullYear();
+            const horario = horarios[datas.length % horarios.length];
+
+            datas.push(`${diasSemanaAbrev[diaSemana]} dia ${diaFormatado}/${mesFormatado}/${anoFormatado} às ${horario}`);
+          }
+        }
+        return datas;
+      };
+
+      const datasExemplo = gerarProximasDatasUteis(3);
+      const datasExemploFormatadas = `${datasExemplo[0]}, ${datasExemplo[1]}, ou ${datasExemplo[2]}`;
+
       console.log(`📅 [DATA] Data atual injetada no prompt: ${dataFormatada}`);
+      console.log(`📅 [DATA] Datas de exemplo para agendamento: ${datasExemploFormatadas}`);
 
       // 👤 ADICIONAR INFORMAÇÃO SOBRE O NOME DO USUÁRIO
       const isFirstMessage = !context.conversationHistory || context.conversationHistory.length === 0;
@@ -697,34 +725,35 @@ Responda sempre em português brasileiro de forma natural e helpful.
 
 FLUXO OBRIGATÓRIO (SIGA CADA PASSO - NÃO PULE NENHUM):
 1. Quando o usuário quiser agendar → PERGUNTE: "Qual é o código do imóvel que você gostou?"
-2. Quando o usuário informar o CÓDIGO do imóvel → PERGUNTE: "Qual é o seu nome completo?"
-3. Quando o usuário informar o nome → PERGUNTE: "Qual é o seu telefone com DDD para contato?"
-4. Quando o usuário informar o telefone → OFEREÇA 3 OPÇÕES DE HORÁRIO (datas futuras)
-5. SOMENTE quando tiver TODOS os 4 dados → CHAME agendar_visita
+2. Quando o usuário informar o CÓDIGO do imóvel → PERGUNTE: "Qual é o seu telefone com DDD para contato?"
+3. Quando o usuário informar o telefone → OFEREÇA 3 OPÇÕES DE HORÁRIO (datas futuras)
+4. SOMENTE quando tiver TODOS os dados (código + telefone + data) → CHAME agendar_visita
+
+📝 SOBRE O NOME DO CLIENTE:
+- USE o nome do usuário que já está disponível (pushName do WhatsApp)
+- NÃO precisa perguntar o nome - use o que aparece no perfil do WhatsApp
+- Se o nome não estiver disponível, aí sim pergunte
 
 🚫 PROIBIÇÕES ABSOLUTAS:
-- NUNCA chame agendar_visita sem ter perguntado e recebido TODOS os 4 dados
-- NUNCA use o nome que aparece no WhatsApp (pushName) - PERGUNTE ao usuário
-- NUNCA use o número do WhatsApp como telefone - PERGUNTE ao usuário
+- NUNCA chame agendar_visita sem ter o código, telefone e data escolhida
+- NUNCA use o número do WhatsApp como telefone - PERGUNTE ao usuário o telefone de contato
 - NUNCA pule a etapa de oferecer horários - SEMPRE ofereça 3 opções
 - NUNCA invente dados - só use o que o usuário INFORMOU EXPLICITAMENTE
 
 OFERTA DE HORÁRIOS (OBRIGATÓRIO):
 - SEMPRE ofereça EXATAMENTE 3 opções de horários
-- Use dias úteis (segunda a sexta) nos PRÓXIMOS 7 DIAS
-- NUNCA ofereça a data de hoje - sempre datas FUTURAS
-- Formato: "Tenho disponível: Quinta dia 02/01/2026 às 9h, Segunda dia 06/01/2026 às 14h, ou Quarta dia 08/01/2026 às 16h. Qual prefere?"
+- Use dias úteis (segunda a sexta) nos PRÓXIMOS 7 DIAS A PARTIR DE HOJE (${dataFormatada})
+- NUNCA ofereça a data de hoje (${dataFormatada}) - sempre datas FUTURAS
+- USE EXATAMENTE estas datas de exemplo: ${datasExemploFormatadas}
 - AGUARDE o usuário escolher antes de chamar agendar_visita
 
 EXEMPLO DE FLUXO CORRETO (SIGA ESTE MODELO):
 - Usuário: "quero agendar" ou "IMV107"
-- Agente: "Ótima escolha! Para agendar uma visita, preciso de alguns dados. Qual é o seu nome completo?"
-- Usuário: "João Silva"
-- Agente: "Perfeito, João! Qual é o seu telefone com DDD para contato?"
+- Agente: "Ótima escolha! Para agendar uma visita do imóvel [CÓDIGO], qual é o seu telefone com DDD para contato?"
 - Usuário: "47 99999-9999"
-- Agente: "Ótimo! Tenho disponível: Quinta dia 02/01/2026 às 9h, Segunda dia 06/01/2026 às 14h, ou Quarta dia 08/01/2026 às 16h. Qual horário você prefere?"
+- Agente: "Perfeito! Tenho disponível: ${datasExemploFormatadas}. Qual horário você prefere?"
 - Usuário: "Segunda às 14h"
-- Agente: [AGORA SIM chama agendar_visita com todos os dados]\n\n`;
+- Agente: [AGORA SIM chama agendar_visita usando o nome do pushName + telefone + código + data]\n\n`;
       systemPrompt += `IMPORTANTE: SEMPRE siga o prompt e personalidade definidos no início desta mensagem. Não mude seu comportamento ou tom.`;
 
       // PRÉ-PROCESSAR: Detectar cidade e tipo no histórico para evitar loops
