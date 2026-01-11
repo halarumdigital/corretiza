@@ -16,7 +16,6 @@ import Configurations from "@/pages/admin/configurations";
 import EvolutionApiSettings from "@/pages/admin/evolution-api";
 import AiSettings from "@/pages/admin/ai-settings";
 import Companies from "@/pages/admin/companies";
-import CustomDomains from "@/pages/admin/custom-domains";
 import Plans from "@/pages/admin/plans";
 import AdminUsers from "@/pages/admin/users";
 
@@ -36,10 +35,6 @@ import Amenities from "@/pages/client/amenities";
 import Cities from "@/pages/client/cities";
 import Brokers from "@/pages/client/brokers";
 import Calendar from "@/pages/client/calendar";
-import Domains from "@/pages/client/domains";
-import WebsiteConfig from "@/pages/client/website-config";
-import Agents from "@/pages/client/agents";
-import Testimonials from "@/pages/client/testimonials";
 
 interface ProtectedRouteProps {
   component: React.ComponentType;
@@ -133,14 +128,6 @@ function Router() {
           requiredRole="admin"
           title="Empresas"
           subtitle="Gerenciamento de empresas"
-        />
-      </Route>
-      <Route path="/admin/custom-domains">
-        <ProtectedRoute
-          component={CustomDomains}
-          requiredRole="admin"
-          title="Domínios Customizados"
-          subtitle="Gerenciamento de domínios personalizados"
         />
       </Route>
       <Route path="/admin/plans">
@@ -279,38 +266,6 @@ function Router() {
           requiredRole="client"
           title="Calendario"
           subtitle="Calendario de agendamentos"
-        />
-      </Route>
-      <Route path="/client/domains">
-        <ProtectedRoute
-          component={Domains}
-          requiredRole="client"
-          title="Domínio Customizado"
-          subtitle="Configure seu domínio personalizado"
-        />
-      </Route>
-      <Route path="/client/website-config">
-        <ProtectedRoute
-          component={WebsiteConfig}
-          requiredRole="client"
-          title="Configurar Website"
-          subtitle="Personalize o template do seu site"
-        />
-      </Route>
-      <Route path="/client/agents">
-        <ProtectedRoute
-          component={Agents}
-          requiredRole="client"
-          title="Corretores"
-          subtitle="Gerencie os corretores da sua equipe"
-        />
-      </Route>
-      <Route path="/client/testimonials">
-        <ProtectedRoute
-          component={Testimonials}
-          requiredRole="client"
-          title="Depoimentos"
-          subtitle="Gerencie os depoimentos de clientes"
         />
       </Route>
 

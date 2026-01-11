@@ -33,16 +33,6 @@ export const companies = mysqlTable("companies", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
-export const companyCustomDomains = mysqlTable("company_custom_domains", {
-  id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-  companyId: varchar("company_id", { length: 36 }).notNull(),
-  requestedDomain: varchar("requested_domain", { length: 255 }),
-  currentDomain: varchar("current_domain", { length: 255 }),
-  status: int("status").notNull().default(0), // 0=Pending, 1=Connected, 2=Rejected, 3=Removed
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
-});
-
 export const globalConfigurations = mysqlTable("global_configurations", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
   logo: text("logo"),
@@ -278,58 +268,6 @@ export const cities = mysqlTable("cities", {
   updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
 });
 
-// Website Templates System Tables
-
-export const websiteTemplates = mysqlTable("website_templates", {
-  id: varchar("id", { length: 36 }).primaryKey(),
-  name: varchar("name", { length: 255 }).notNull(),
-  description: text("description"),
-  thumbnail: varchar("thumbnail", { length: 500 }),
-  category: varchar("category", { length: 100 }),
-  features: json("features"),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
-});
-
-export const companyWebsites = mysqlTable("company_websites", {
-  id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-  companyId: varchar("company_id", { length: 36 }).notNull(),
-  templateId: varchar("template_id", { length: 36 }).notNull(),
-  config: json("config").notNull(), // TemplateConfig completo
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
-});
-
-export const companyAgents = mysqlTable("company_agents", {
-  id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-  companyId: varchar("company_id", { length: 36 }).notNull(),
-  name: varchar("name", { length: 255 }).notNull(),
-  email: varchar("email", { length: 255 }),
-  phone: varchar("phone", { length: 50 }),
-  avatar: varchar("avatar", { length: 500 }),
-  role: varchar("role", { length: 100 }),
-  bio: text("bio"),
-  socialMedia: json("social_media"),
-  propertiesSold: int("properties_sold").default(0),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
-});
-
-export const companyTestimonials = mysqlTable("company_testimonials", {
-  id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
-  companyId: varchar("company_id", { length: 36 }).notNull(),
-  clientName: varchar("client_name", { length: 255 }).notNull(),
-  clientAvatar: varchar("client_avatar", { length: 500 }),
-  rating: int("rating").notNull().default(5),
-  comment: text("comment").notNull(),
-  propertyType: varchar("property_type", { length: 100 }),
-  isActive: boolean("is_active").default(true),
-  createdAt: timestamp("created_at").defaultNow(),
-  updatedAt: timestamp("updated_at").defaultNow().onUpdateNow(),
-});
-
 // Plans Table
 export const plans = mysqlTable("plans", {
   id: varchar("id", { length: 36 }).primaryKey().default(sql`(UUID())`),
@@ -392,13 +330,6 @@ export const insertCompanySchema = createInsertSchema(companies).pick({
   responsiblePhone: true,
   responsibleEmail: true,
   planId: true,
-  status: true,
-});
-
-export const insertCompanyCustomDomainSchema = createInsertSchema(companyCustomDomains).pick({
-  companyId: true,
-  requestedDomain: true,
-  currentDomain: true,
   status: true,
 });
 
@@ -595,45 +526,6 @@ export const insertCitySchema = createInsertSchema(cities).pick({
   name: true,
 });
 
-export const insertWebsiteTemplateSchema = createInsertSchema(websiteTemplates).pick({
-  id: true,
-  name: true,
-  description: true,
-  thumbnail: true,
-  category: true,
-  features: true,
-});
-
-export const insertCompanyWebsiteSchema = createInsertSchema(companyWebsites).pick({
-  companyId: true,
-  templateId: true,
-  config: true,
-  isActive: true,
-});
-
-export const insertCompanyAgentSchema = createInsertSchema(companyAgents).pick({
-  companyId: true,
-  name: true,
-  email: true,
-  phone: true,
-  avatar: true,
-  role: true,
-  bio: true,
-  socialMedia: true,
-  propertiesSold: true,
-  isActive: true,
-});
-
-export const insertCompanyTestimonialSchema = createInsertSchema(companyTestimonials).pick({
-  companyId: true,
-  clientName: true,
-  clientAvatar: true,
-  rating: true,
-  comment: true,
-  propertyType: true,
-  isActive: true,
-});
-
 export const insertPlanSchema = createInsertSchema(plans).pick({
   name: true,
   price: true,
@@ -669,8 +561,6 @@ export type User = typeof users.$inferSelect;
 export type InsertUser = z.infer<typeof insertUserSchema>;
 export type Company = typeof companies.$inferSelect;
 export type InsertCompany = z.infer<typeof insertCompanySchema>;
-export type CompanyCustomDomain = typeof companyCustomDomains.$inferSelect;
-export type InsertCompanyCustomDomain = z.infer<typeof insertCompanyCustomDomainSchema>;
 export type GlobalConfiguration = typeof globalConfigurations.$inferSelect;
 export type InsertGlobalConfiguration = z.infer<typeof insertGlobalConfigSchema>;
 export type EvolutionApiConfiguration = typeof evolutionApiConfigurations.$inferSelect;
@@ -703,14 +593,6 @@ export type Amenity = typeof amenities.$inferSelect;
 export type InsertAmenity = z.infer<typeof insertAmenitySchema>;
 export type City = typeof cities.$inferSelect;
 export type InsertCity = z.infer<typeof insertCitySchema>;
-export type WebsiteTemplate = typeof websiteTemplates.$inferSelect;
-export type InsertWebsiteTemplate = z.infer<typeof insertWebsiteTemplateSchema>;
-export type CompanyWebsite = typeof companyWebsites.$inferSelect;
-export type InsertCompanyWebsite = z.infer<typeof insertCompanyWebsiteSchema>;
-export type CompanyAgent = typeof companyAgents.$inferSelect;
-export type InsertCompanyAgent = z.infer<typeof insertCompanyAgentSchema>;
-export type CompanyTestimonial = typeof companyTestimonials.$inferSelect;
-export type InsertCompanyTestimonial = z.infer<typeof insertCompanyTestimonialSchema>;
 export type Plan = typeof plans.$inferSelect;
 export type InsertPlan = z.infer<typeof insertPlanSchema>;
 export type Broker = typeof brokers.$inferSelect;

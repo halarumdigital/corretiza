@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
   Building, Settings, Waypoints, Bot, Users,
   LayoutDashboard, User, MessageSquare,
-  MessageCircle, LogOut, ChevronDown, ChevronRight, Send, List, Globe, Home, UserPlus, Sparkles, MapPin, CreditCard, Calendar
+  LogOut, ChevronDown, ChevronRight, Send, List, Home, UserPlus, Sparkles, MapPin, CreditCard, Calendar
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { GlobalConfiguration } from "@/types";
@@ -28,7 +28,6 @@ const adminNavItems: NavItem[] = [
   { href: "/admin/companies", label: "Empresas", icon: <Building className="w-5 h-5" /> },
   { href: "/admin/users", label: "Usuários", icon: <Users className="w-5 h-5" /> },
   { href: "/admin/plans", label: "Planos", icon: <CreditCard className="w-5 h-5" /> },
-  { href: "/admin/custom-domains", label: "Domínios Customizados", icon: <Globe className="w-5 h-5" /> },
 ];
 
 const clientNavItems: NavItem[] = [
@@ -61,17 +60,7 @@ const clientNavItems: NavItem[] = [
   },
   { href: "/client/corretores", label: "Corretores", icon: <User className="w-5 h-5" /> },
   { href: "/client/calendario", label: "Calendario", icon: <Calendar className="w-5 h-5" /> },
-  {
-    label: "Website",
-    icon: <Globe className="w-5 h-5" />,
-    children: [
-      { href: "/client/website-config", label: "Configurar Website", icon: <Settings className="w-4 h-4" /> },
-      { href: "/client/agents", label: "Corretores", icon: <Users className="w-4 h-4" /> },
-      { href: "/client/testimonials", label: "Depoimentos", icon: <MessageSquare className="w-4 h-4" /> },
-    ]
-  },
   { href: "/client/ai-agents", label: "Agentes IA", icon: <Bot className="w-5 h-5" /> },
-  { href: "/client/domains", label: "Domínio Customizado", icon: <Globe className="w-5 h-5" /> },
 ];
 
 export function Sidebar() {
