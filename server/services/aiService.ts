@@ -646,12 +646,14 @@ IMPORTANTE: Você NÃO tem acesso aos imóveis sem usar a função busca_imoveis
 Se o usuário perguntar sobre imóveis e você NÃO chamar a função, você não terá dados para responder.
 
 🔍 ANTES DE CHAMAR busca_imoveis:
-- Você PRECISA ter pelo menos: tipo_imovel E cidade
+- Você PRECISA ter pelo menos: tipo_imovel E cidade E faixa de preço
 - Se o usuário NÃO informou a CIDADE, PERGUNTE a cidade ANTES de buscar
 - Se o usuário NÃO informou o TIPO DE IMÓVEL, PERGUNTE o tipo ANTES de buscar
+- Se o usuário NÃO informou a FAIXA DE PREÇO, PERGUNTE: "Qual faixa de preço você está buscando? (ex: até 300 mil, entre 200 e 500 mil, acima de 1 milhão)"
 - NUNCA busque imóveis sem saber a CIDADE - sempre pergunte primeiro!
 - Se o usuário mencionou "apartamento", "casa", "sala", "terreno", "sobrado" ou "chácara", você tem o tipo_imovel
 - Se o usuário mencionou "alugar", "locação", "venda", "comprar", você tem o tipo_transacao
+- Se o usuário mencionou valores como "até X", "acima de X", "entre X e Y", você tem a faixa de preço
 - Analise TODO o histórico da conversa para identificar esses parâmetros
 
 QUANDO você chamar a função busca_imoveis:
@@ -680,10 +682,12 @@ Quando o usuário digitar "mais", "quero ver mais", "mostre mais", "próximos", 
 - O sistema continuará mostrando de 3 em 3 até acabar
 
 🚨 REGRAS PARA CHAMAR busca_imoveis:
-- Você SÓ pode chamar busca_imoveis quando tiver TANTO o tipo de imóvel QUANTO a cidade
+- Você SÓ pode chamar busca_imoveis quando tiver: tipo de imóvel, cidade E faixa de preço
 - Se falta a CIDADE: pergunte "Em qual cidade você está procurando?"
 - Se falta o TIPO DE IMÓVEL: pergunte "Que tipo de imóvel você procura? Casa, apartamento, terreno, sala comercial, sobrado ou chácara?"
-- Quando tiver AMBOS (tipo + cidade), aí sim chame a função busca_imoveis
+- Se falta a FAIXA DE PREÇO: pergunte "Qual faixa de preço você está buscando? (ex: até 300 mil, entre 200 e 500 mil, acima de 1 milhão)"
+- Quando tiver TODOS (tipo + cidade + faixa de preço), aí sim chame a função busca_imoveis
+- Se o usuário disser que não tem preferência de preço ou "qualquer valor", você pode buscar sem filtro de preço
 
 Responda sempre em português brasileiro de forma natural e helpful.
 
@@ -890,6 +894,14 @@ EXEMPLO DE FLUXO CORRETO (SIGA ESTE MODELO):
                   enum: ["apartamento", "casa", "sala", "terreno", "sobrado", "chácara"],
                   description: "CRÍTICO: Tipo específico do imóvel que o usuário procura. Valores aceitos: 'apartamento', 'casa', 'sala', 'terreno', 'sobrado', 'chácara'. Se o usuário mencionar 'ap', 'apto' = use 'apartamento'. SEMPRE forneça este parâmetro quando o usuário mencionar o tipo (ex: 'quero um apartamento', 'procuro casa', etc). Extraia da mensagem atual ou do histórico da conversa."
                 },
+                preco_minimo: {
+                  type: "number",
+                  description: "Valor mínimo do imóvel em reais (R$). Extraia da mensagem ou histórico quando o usuário mencionar faixa de preço. Exemplo: se o usuário diz 'até 500 mil', preco_maximo=500000. Se diz 'acima de 300 mil', preco_minimo=300000."
+                },
+                preco_maximo: {
+                  type: "number",
+                  description: "Valor máximo do imóvel em reais (R$). Extraia da mensagem ou histórico quando o usuário mencionar faixa de preço. Exemplo: se o usuário diz 'até 500 mil', preco_maximo=500000. Se diz 'entre 200 e 400 mil', preco_minimo=200000 e preco_maximo=400000."
+                },
                 limite: {
                   type: "number",
                   description: "Número máximo de imóveis a retornar. Padrão: 3. O sistema mostra de 3 em 3 automaticamente."
@@ -1010,6 +1022,8 @@ EXEMPLO DE FLUXO CORRETO (SIGA ESTE MODELO):
             let cidade = functionArgs.cidade;
             let tipo_imovel = functionArgs.tipo_imovel;
             let tipo_transacao = functionArgs.tipo_transacao;
+            let preco_minimo = functionArgs.preco_minimo;
+            let preco_maximo = functionArgs.preco_maximo;
             let limite = functionArgs.limite || 3; // Padrão: 3 resultados
             let offset = 0; // Quantos resultados pular
 
@@ -1195,8 +1209,13 @@ EXEMPLO DE FLUXO CORRETO (SIGA ESTE MODELO):
             const searchFilters = {
               city: cidade,
               transactionType: tipo_transacao === 'aluguel' ? 'locacao' : tipo_transacao,
-              propertyType: tipo_imovel
+              propertyType: tipo_imovel,
+              priceMin: preco_minimo,
+              priceMax: preco_maximo
             };
+
+            console.log(`🔍 [FUNCTION_CALL] preco_minimo: ${preco_minimo || 'NÃO FORNECIDO'}`);
+            console.log(`🔍 [FUNCTION_CALL] preco_maximo: ${preco_maximo || 'NÃO FORNECIDO'}`);
 
             console.log(`🔍 [FUNCTION_CALL] Objeto searchFilters completo:`, JSON.stringify(searchFilters, null, 2));
             console.log('🔍 [FUNCTION_CALL] ================================================================');

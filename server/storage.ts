@@ -124,6 +124,8 @@ export interface IStorage {
     city?: string;
     transactionType?: string;
     propertyType?: string;
+    priceMin?: number;
+    priceMax?: number;
   }): Promise<Property[]>;
   createProperty(property: InsertProperty): Promise<Property>;
   updateProperty(id: string, updates: Partial<Property>): Promise<Property>;
@@ -2271,6 +2273,8 @@ export class MySQLStorage implements IStorage {
     city?: string;
     transactionType?: string;
     propertyType?: string;
+    priceMin?: number;
+    priceMax?: number;
   }): Promise<Property[]> {
     if (!this.connection) throw new Error('No database connection');
 
@@ -2305,6 +2309,18 @@ export class MySQLStorage implements IStorage {
       console.log('🔍 [SEARCH_PROPERTIES] Adicionando filtro de tipo de imóvel:', filters.propertyType);
     } else {
       console.log('⚠️ [SEARCH_PROPERTIES] ATENÇÃO: propertyType NÃO foi fornecido! Filtro de tipo NÃO será aplicado!');
+    }
+
+    if (filters.priceMin !== undefined && filters.priceMin > 0) {
+      query += ' AND price >= ?';
+      params.push(filters.priceMin);
+      console.log('🔍 [SEARCH_PROPERTIES] Adicionando filtro de preço mínimo:', filters.priceMin);
+    }
+
+    if (filters.priceMax !== undefined && filters.priceMax > 0) {
+      query += ' AND price <= ?';
+      params.push(filters.priceMax);
+      console.log('🔍 [SEARCH_PROPERTIES] Adicionando filtro de preço máximo:', filters.priceMax);
     }
 
     query += ' ORDER BY created_at DESC';
