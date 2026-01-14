@@ -78,6 +78,15 @@ export class AIService {
 
       console.log(`✅ [AI-${aiProcessId}] Instance found: ${instance.name} (DB ID: ${instance.id})`);
 
+      // ============================================
+      // HANDLER DE COMANDOS ESPECIAIS
+      // ============================================
+      const commandResult = await this.handleSpecialCommands(context, instance.companyId, aiProcessId);
+      if (commandResult) {
+        console.log(`📋 [AI-${aiProcessId}] Comando especial processado, retornando resposta direta`);
+        return commandResult;
+      }
+
       if (!instance.aiAgentId) {
         console.error(`❌ [AI-${aiProcessId}] No agent linked to instance ${instance.name}. AgentId: ${instance.aiAgentId}`);
         return null;
@@ -2168,6 +2177,119 @@ ${whatsappLink}`;
 
     } catch (error) {
       console.error(`❌ [CUSTOMER_UPDATE] Erro ao atualizar customer:`, error);
+    }
+  }
+
+  // ============================================
+  // HANDLER DE COMANDOS ESPECIAIS (ex: /visitas)
+  // ============================================
+  private async handleSpecialCommands(
+    context: MessageContext,
+    companyId: string,
+    processId: string
+  ): Promise<AgentResponse | null> {
+    const message = context.message.trim().toLowerCase();
+
+    // Comando /visitas - Retorna agenda de visitas do corretor
+    if (message === '/visitas') {
+      console.log(`📋 [AI-${processId}] Comando /visitas detectado`);
+      return await this.handleVisitasCommand(context, companyId, processId);
+    }
+
+    // Outros comandos podem ser adicionados aqui no futuro
+    // if (message === '/outro_comando') { ... }
+
+    return null; // Não é um comando especial, continuar processamento normal
+  }
+
+  private async handleVisitasCommand(
+    context: MessageContext,
+    companyId: string,
+    processId: string
+  ): Promise<AgentResponse> {
+    const storage = getStorage();
+
+    try {
+      // Buscar corretor pelo número de WhatsApp
+      console.log(`🔍 [AI-${processId}] Buscando corretor pelo telefone: ${context.phone}`);
+      const broker = await storage.getBrokerByWhatsapp(companyId, context.phone);
+
+      if (!broker) {
+        console.log(`❌ [AI-${processId}] Corretor não encontrado para o número: ${context.phone}`);
+        return {
+          response: `Olá! Você não está cadastrado como corretor no sistema.\n\nPara usar o comando /visitas, seu número de WhatsApp precisa estar cadastrado na área de corretores.`
+        };
+      }
+
+      console.log(`✅ [AI-${processId}] Corretor encontrado: ${broker.name} (ID: ${broker.id})`);
+
+      // Buscar visitas da semana do corretor
+      const appointments = await storage.getAppointmentsByBrokerWeek(broker.id);
+      console.log(`📅 [AI-${processId}] Visitas encontradas: ${appointments.length}`);
+
+      if (appointments.length === 0) {
+        return {
+          response: `Olá, ${broker.name}! 👋\n\nVocê não tem visitas agendadas para os próximos 7 dias.\n\nQuando houver novos agendamentos, eles aparecerão aqui!`
+        };
+      }
+
+      // Formatar resposta com as visitas
+      let response = `📅 *Olá, ${broker.name}!*\n\nSua agenda de visitas para os próximos 7 dias:\n\n`;
+
+      for (let i = 0; i < appointments.length; i++) {
+        const apt = appointments[i];
+
+        // Buscar informações do imóvel se houver propertyId
+        let propertyInfo = apt.propertyInterest || 'Não especificado';
+        if (apt.propertyId) {
+          const property = await storage.getProperty(apt.propertyId);
+          if (property) {
+            propertyInfo = `${property.name} - ${property.code}`;
+            if (property.street && property.neighborhood) {
+              propertyInfo += `\n   📍 ${property.street}, ${property.number} - ${property.neighborhood}`;
+            }
+          }
+        }
+
+        // Formatar data e hora
+        let formattedDate = 'Data não definida';
+        if (apt.scheduledDate) {
+          const date = new Date(apt.scheduledDate);
+          const dias = ['Domingo', 'Segunda', 'Terça', 'Quarta', 'Quinta', 'Sexta', 'Sábado'];
+          const dia = dias[date.getDay()];
+          formattedDate = `${dia}, ${date.toLocaleDateString('pt-BR')} às ${date.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })}`;
+        }
+
+        // Criar link do WhatsApp para o cliente
+        const clientPhoneClean = apt.clientPhone.replace(/\D/g, '');
+        const whatsappLink = `https://wa.me/${clientPhoneClean}`;
+
+        // Status formatado
+        const statusEmoji = apt.status === 'confirmado' ? '✅' : '⏳';
+        const statusText = apt.status === 'confirmado' ? 'Confirmado' : 'Pendente';
+
+        response += `━━━━━━━━━━━━━━━━━━━━━\n`;
+        response += `*Visita ${i + 1}* ${statusEmoji} ${statusText}\n\n`;
+        response += `👤 *Cliente:* ${apt.clientName}\n`;
+        response += `🏠 *Imóvel:* ${propertyInfo}\n`;
+        response += `📆 *Data:* ${formattedDate}\n`;
+        response += `📱 *WhatsApp:* ${whatsappLink}\n`;
+
+        if (apt.notes) {
+          response += `📝 *Obs:* ${apt.notes}\n`;
+        }
+      }
+
+      response += `━━━━━━━━━━━━━━━━━━━━━\n\n`;
+      response += `Total: *${appointments.length} visita(s)* agendada(s)`;
+
+      return { response };
+
+    } catch (error) {
+      console.error(`❌ [AI-${processId}] Erro ao processar comando /visitas:`, error);
+      return {
+        response: `Desculpe, ocorreu um erro ao buscar suas visitas. Por favor, tente novamente em alguns instantes.`
+      };
     }
   }
 }

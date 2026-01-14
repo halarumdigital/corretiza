@@ -156,6 +156,7 @@ export interface IStorage {
   // Brokers (Corretores)
   getBroker(id: string): Promise<Broker | undefined>;
   getBrokersByCompany(companyId: string): Promise<Broker[]>;
+  getBrokerByWhatsapp(companyId: string, whatsapp: string): Promise<Broker | undefined>;
   countBrokersByCompany(companyId: string): Promise<number>;
   createBroker(broker: InsertBroker): Promise<Broker>;
   updateBroker(id: string, updates: Partial<Broker>): Promise<Broker>;
@@ -165,6 +166,7 @@ export interface IStorage {
   getAppointment(id: string): Promise<Appointment | undefined>;
   getAppointmentsByCompany(companyId: string): Promise<Appointment[]>;
   getAppointmentsByBroker(brokerId: string): Promise<Appointment[]>;
+  getAppointmentsByBrokerWeek(brokerId: string): Promise<Appointment[]>;
   getLastAppointmentOfDayWithBroker(companyId: string): Promise<Appointment | undefined>;
   createAppointment(appointment: InsertAppointment): Promise<Appointment>;
   updateAppointment(id: string, updates: Partial<Appointment>): Promise<Appointment>;
@@ -2838,6 +2840,25 @@ export class MySQLStorage implements IStorage {
     return (rows as any[]).map(row => this.mapBrokerRow(row));
   }
 
+  async getBrokerByWhatsapp(companyId: string, whatsapp: string): Promise<Broker | undefined> {
+    if (!this.connection) throw new Error('No database connection');
+
+    // Normaliza o número removendo caracteres não numéricos
+    const normalizedWhatsapp = whatsapp.replace(/\D/g, '');
+
+    const [rows] = await this.connection.execute(
+      `SELECT * FROM brokers
+       WHERE company_id = ?
+       AND REPLACE(REPLACE(REPLACE(REPLACE(whatsapp, '(', ''), ')', ''), '-', ''), ' ', '') = ?`,
+      [companyId, normalizedWhatsapp]
+    );
+
+    const brokers = rows as any[];
+    if (brokers.length === 0) return undefined;
+
+    return this.mapBrokerRow(brokers[0]);
+  }
+
   async countBrokersByCompany(companyId: string): Promise<number> {
     if (!this.connection) throw new Error('No database connection');
 
@@ -2952,6 +2973,25 @@ export class MySQLStorage implements IStorage {
 
     const [rows] = await this.connection.execute(
       'SELECT * FROM appointments WHERE broker_id = ? ORDER BY scheduled_date DESC',
+      [brokerId]
+    );
+
+    return (rows as any[]).map(row => this.mapAppointmentRow(row));
+  }
+
+  async getAppointmentsByBrokerWeek(brokerId: string): Promise<Appointment[]> {
+    if (!this.connection) throw new Error('No database connection');
+
+    // Busca visitas da semana atual (de hoje até 7 dias)
+    // Inclui visitas pendentes, confirmadas
+    const [rows] = await this.connection.execute(
+      `SELECT * FROM appointments
+       WHERE broker_id = ?
+       AND scheduled_date IS NOT NULL
+       AND scheduled_date >= CURDATE()
+       AND scheduled_date <= DATE_ADD(CURDATE(), INTERVAL 7 DAY)
+       AND status IN ('pendente', 'confirmado')
+       ORDER BY scheduled_date ASC`,
       [brokerId]
     );
 
